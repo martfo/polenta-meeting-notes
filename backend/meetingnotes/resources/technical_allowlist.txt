@@ -1,0 +1,80 @@
+# Technical allowlist for the British English dictionary flag.
+# One term per line. Matching is case-insensitive. Words listed here are not flagged as
+# unknown, so product names, tools, and jargon do not produce noise. This is a starting set,
+# safe to extend. Lines beginning with a hash are comments.
+
+# App and pipeline
+transcript
+transcripts
+diarisation
+diarise
+diarised
+voiceprint
+voiceprints
+enrolment
+embedding
+embeddings
+cosine
+metadata
+timestamp
+timestamps
+markdown
+frontmatter
+changelog
+
+# Models and machine learning
+WhisperX
+Whisper
+pyannote
+wav2vec2
+faster-whisper
+bge
+Qwen
+MoE
+Hunspell
+spylls
+OCR
+LLM
+tokeniser
+inference
+
+# Stack and infrastructure
+LM
+LMStudio
+LanceDB
+SQLite
+FastAPI
+uvicorn
+pydantic
+uv
+Docker
+macOS
+Keychain
+FileVault
+CoreAudio
+AVFoundation
+SwiftUI
+localhost
+loopback
+config
+JSON
+YAML
+API
+UUID
+TCC
+
+# Meeting platforms
+Zoom
+Teams
+Meet
+Slack
+Granola
+
+# User tools and services
+Obsidian
+Raycast
+n8n
+LangGraph
+CrewAI
+Fantastical
+DesignTurbine
