@@ -1,0 +1,57 @@
+"""Audio import: the permanent way to bring an existing WAV into the app, and
+how the pipeline is tested. Import writes the audio into the vault, creates
+the meeting row, enqueues processing, and returns at once. Capture does
+exactly the same on Stop, so both paths produce the same downstream job."""
+
+from __future__ import annotations
+
+import shutil
+import sqlite3
+import wave
+from datetime import datetime
+from pathlib import Path
+
+from meetingnotes.jobs import queue as q
+from meetingnotes.storage import meetings as m
+from meetingnotes.storage.vault import Vault
+
+
+def wav_duration_s(path: Path) -> int:
+    with wave.open(str(path), "rb") as w:
+        return round(w.getnframes() / w.getframerate())
+
+
+def import_wav(
+    conn: sqlite3.Connection,
+    vault: Vault,
+    wav_path: Path | str,
+    title: str | None = None,
+    started_at: datetime | None = None,
+    source: str = "online",
+    expected_speakers: int | None = None,
+) -> str:
+    """Copy the WAV into a new meeting folder, create the row, enqueue a job.
+
+    Returns the meeting id without waiting for any processing.
+    """
+    wav_path = Path(wav_path)
+    title = title or wav_path.stem.replace("_", " ").replace("-", " ").strip() or "Imported meeting"
+    started_at = started_at or datetime.now().astimezone()
+
+    meeting_id = vault.new_meeting_id(started_at, title)
+    meeting_dir = vault.meeting_dir(meeting_id)
+    meeting_dir.mkdir(parents=True)
+    shutil.copyfile(wav_path, vault.audio_path(meeting_id))
+
+    m.create_meeting(
+        conn,
+        meeting_id,
+        title=title,
+        started_at=started_at.isoformat(timespec="seconds"),
+        vault_path=str(meeting_dir),
+        source=source,
+        duration_s=wav_duration_s(vault.audio_path(meeting_id)),
+        expected_speakers=expected_speakers,
+    )
+    q.enqueue(conn, meeting_id, stage="transcribe")
+    return meeting_id
