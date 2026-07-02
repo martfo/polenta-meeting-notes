@@ -7,7 +7,19 @@
       "Bash(brew install *)",
       "Bash(git init *)",
       "Bash(git add *)",
-      "Bash(git commit -q -m 'Scaffold: DESIGN.md, README, British English resources *)"
+      "Bash(git commit -q -m 'Scaffold: DESIGN.md, README, British English resources *)",
+      "Bash(git config *)",
+      "Bash(uv python *)",
+      "Bash(uv sync *)",
+      "Bash(curl -fsSL -o dict/en_GB.aff https://raw.githubusercontent.com/LibreOffice/dictionaries/master/en/en_GB.aff)",
+      "Bash(curl -fsSL -o dict/en_GB.dic https://raw.githubusercontent.com/LibreOffice/dictionaries/master/en/en_GB.dic)",
+      "Bash(curl -fsSL -o dict/README_en_GB.txt https://raw.githubusercontent.com/LibreOffice/dictionaries/master/en/README_en_GB.txt)",
+      "Bash(uv run python -c ' *)",
+      "Bash(say -v '?')",
+      "Bash(say -v Daniel -o test.wav --data-format=LEI16@16000 \"testing one two three\")",
+      "Bash(afinfo test.wav)",
+      "Bash(uv run *)",
+      "Bash(afinfo ../fixtures/audio/two_speaker_meeting.wav)"
     ]
   }
 }

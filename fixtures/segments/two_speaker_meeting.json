@@ -1,0 +1,372 @@
+{
+  "language": "en",
+  "segments": [
+    {
+      "start": 0.6,
+      "end": 7.371,
+      "speaker": "SPEAKER_00",
+      "text": "Good afternoon everyone. Today we are reviewing the hydroponics project budget and the delivery timeline for the client.",
+      "words": [
+        {
+          "word": "Good",
+          "start": 0.6,
+          "end": 0.88
+        },
+        {
+          "word": "afternoon",
+          "start": 0.88,
+          "end": 1.439
+        },
+        {
+          "word": "everyone.",
+          "start": 1.439,
+          "end": 1.999
+        },
+        {
+          "word": "Today",
+          "start": 1.999,
+          "end": 2.335
+        },
+        {
+          "word": "we",
+          "start": 2.335,
+          "end": 2.503
+        },
+        {
+          "word": "are",
+          "start": 2.503,
+          "end": 2.726
+        },
+        {
+          "word": "reviewing",
+          "start": 2.726,
+          "end": 3.286
+        },
+        {
+          "word": "the",
+          "start": 3.286,
+          "end": 3.51
+        },
+        {
+          "word": "hydroponics",
+          "start": 3.51,
+          "end": 4.181
+        },
+        {
+          "word": "project",
+          "start": 4.181,
+          "end": 4.629
+        },
+        {
+          "word": "budget",
+          "start": 4.629,
+          "end": 5.021
+        },
+        {
+          "word": "and",
+          "start": 5.021,
+          "end": 5.245
+        },
+        {
+          "word": "the",
+          "start": 5.245,
+          "end": 5.468
+        },
+        {
+          "word": "delivery",
+          "start": 5.468,
+          "end": 5.972
+        },
+        {
+          "word": "timeline",
+          "start": 5.972,
+          "end": 6.476
+        },
+        {
+          "word": "for",
+          "start": 6.476,
+          "end": 6.7
+        },
+        {
+          "word": "the",
+          "start": 6.7,
+          "end": 6.923
+        },
+        {
+          "word": "client.",
+          "start": 6.923,
+          "end": 7.371
+        }
+      ]
+    },
+    {
+      "start": 7.971,
+      "end": 14.764,
+      "speaker": "SPEAKER_01",
+      "text": "Thanks Daniel. The greenhouse sensors arrived on Tuesday, and installation begins next week if the wiring is approved.",
+      "words": [
+        {
+          "word": "Thanks",
+          "start": 7.971,
+          "end": 8.371
+        },
+        {
+          "word": "Daniel.",
+          "start": 8.371,
+          "end": 8.827
+        },
+        {
+          "word": "The",
+          "start": 8.827,
+          "end": 9.056
+        },
+        {
+          "word": "greenhouse",
+          "start": 9.056,
+          "end": 9.684
+        },
+        {
+          "word": "sensors",
+          "start": 9.684,
+          "end": 10.14
+        },
+        {
+          "word": "arrived",
+          "start": 10.14,
+          "end": 10.597
+        },
+        {
+          "word": "on",
+          "start": 10.597,
+          "end": 10.768
+        },
+        {
+          "word": "Tuesday,",
+          "start": 10.768,
+          "end": 11.282
+        },
+        {
+          "word": "and",
+          "start": 11.282,
+          "end": 11.51
+        },
+        {
+          "word": "installation",
+          "start": 11.51,
+          "end": 12.253
+        },
+        {
+          "word": "begins",
+          "start": 12.253,
+          "end": 12.652
+        },
+        {
+          "word": "next",
+          "start": 12.652,
+          "end": 12.938
+        },
+        {
+          "word": "week",
+          "start": 12.938,
+          "end": 13.223
+        },
+        {
+          "word": "if",
+          "start": 13.223,
+          "end": 13.394
+        },
+        {
+          "word": "the",
+          "start": 13.394,
+          "end": 13.623
+        },
+        {
+          "word": "wiring",
+          "start": 13.623,
+          "end": 14.022
+        },
+        {
+          "word": "is",
+          "start": 14.022,
+          "end": 14.194
+        },
+        {
+          "word": "approved.",
+          "start": 14.194,
+          "end": 14.764
+        }
+      ]
+    },
+    {
+      "start": 15.364,
+      "end": 19.996,
+      "speaker": "SPEAKER_00",
+      "text": "That works well. Please send the revised schedule to the whole team before Friday.",
+      "words": [
+        {
+          "word": "That",
+          "start": 15.364,
+          "end": 15.643
+        },
+        {
+          "word": "works",
+          "start": 15.643,
+          "end": 15.978
+        },
+        {
+          "word": "well.",
+          "start": 15.978,
+          "end": 16.313
+        },
+        {
+          "word": "Please",
+          "start": 16.313,
+          "end": 16.704
+        },
+        {
+          "word": "send",
+          "start": 16.704,
+          "end": 16.983
+        },
+        {
+          "word": "the",
+          "start": 16.983,
+          "end": 17.206
+        },
+        {
+          "word": "revised",
+          "start": 17.206,
+          "end": 17.653
+        },
+        {
+          "word": "schedule",
+          "start": 17.653,
+          "end": 18.155
+        },
+        {
+          "word": "to",
+          "start": 18.155,
+          "end": 18.322
+        },
+        {
+          "word": "the",
+          "start": 18.322,
+          "end": 18.545
+        },
+        {
+          "word": "whole",
+          "start": 18.545,
+          "end": 18.88
+        },
+        {
+          "word": "team",
+          "start": 18.88,
+          "end": 19.159
+        },
+        {
+          "word": "before",
+          "start": 19.159,
+          "end": 19.55
+        },
+        {
+          "word": "Friday.",
+          "start": 19.55,
+          "end": 19.996
+        }
+      ]
+    },
+    {
+      "start": 20.596,
+      "end": 26.404,
+      "speaker": "SPEAKER_01",
+      "text": "Will do. I still need a decision about the irrigation controller supplier before we can order anything.",
+      "words": [
+        {
+          "word": "Will",
+          "start": 20.596,
+          "end": 20.876
+        },
+        {
+          "word": "do.",
+          "start": 20.876,
+          "end": 21.099
+        },
+        {
+          "word": "I",
+          "start": 21.099,
+          "end": 21.211
+        },
+        {
+          "word": "still",
+          "start": 21.211,
+          "end": 21.546
+        },
+        {
+          "word": "need",
+          "start": 21.546,
+          "end": 21.825
+        },
+        {
+          "word": "a",
+          "start": 21.825,
+          "end": 21.937
+        },
+        {
+          "word": "decision",
+          "start": 21.937,
+          "end": 22.439
+        },
+        {
+          "word": "about",
+          "start": 22.439,
+          "end": 22.774
+        },
+        {
+          "word": "the",
+          "start": 22.774,
+          "end": 22.998
+        },
+        {
+          "word": "irrigation",
+          "start": 22.998,
+          "end": 23.612
+        },
+        {
+          "word": "controller",
+          "start": 23.612,
+          "end": 24.226
+        },
+        {
+          "word": "supplier",
+          "start": 24.226,
+          "end": 24.729
+        },
+        {
+          "word": "before",
+          "start": 24.729,
+          "end": 25.119
+        },
+        {
+          "word": "we",
+          "start": 25.119,
+          "end": 25.287
+        },
+        {
+          "word": "can",
+          "start": 25.287,
+          "end": 25.51
+        },
+        {
+          "word": "order",
+          "start": 25.51,
+          "end": 25.845
+        },
+        {
+          "word": "anything.",
+          "start": 25.845,
+          "end": 26.404
+        }
+      ]
+    }
+  ]
+}
