@@ -11,16 +11,27 @@ enum KeychainTokenStore {
     static let service = "MeetingNotes"
     static let account = "huggingface-token"
 
+    /// Written through the security tool rather than SecItemAdd, for the same
+    /// reason the backend reads through it: a token first stored from the
+    /// terminal belongs to that tool's access list, and SecItemAdd from the
+    /// app collides with it as an untouchable duplicate. The -U flag updates
+    /// an existing item in place.
     static func save(token: String) -> Bool {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = [
+            "add-generic-password", "-U",
+            "-s", service, "-a", account, "-w", token,
         ]
-        SecItemDelete(query as CFDictionary)
-        var attributes = query
-        attributes[kSecValueData as String] = Data(token.utf8)
-        return SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        do {
+            try process.run()
+        } catch {
+            return false
+        }
+        process.waitUntilExit()
+        return process.terminationStatus == 0
     }
 }
 
