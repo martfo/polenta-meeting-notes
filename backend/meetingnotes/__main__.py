@@ -56,12 +56,30 @@ def main(config_path: str) -> None:
 
         return PyannoteSpeakerEmbedder(hf_token=read_hf_token())
 
+    from meetingnotes.vectors.indexer import BgeM3Embedder, index_meeting
+    from meetingnotes.vectors.store import VectorStore
+
+    store = VectorStore(vault.lancedb_dir)
+    text_embedder = _Lazy(lambda: BgeM3Embedder(config.embedding_model))
+
+    def chunk_indexer(meeting_id: str) -> None:
+        import logging
+
+        try:
+            index_meeting(conn, vault, store, text_embedder, meeting_id)
+        except ModuleNotFoundError:
+            logging.getLogger("meetingnotes").warning(
+                "embedding model not installed; library search skipped",
+                extra={"meeting_id": meeting_id, "stage": "embed"},
+            )
+
     stages = build_stages(
         conn, vault, config,
         engine=_Lazy(make_engine),
         speaker_embedder=_Lazy(make_embedder),
         lm_client=lm_client,
         ocr_engine=VisionOcr(),
+        chunk_indexer=chunk_indexer,
     )
     worker = Worker(conn, stages)
     worker.start()
@@ -69,6 +87,7 @@ def main(config_path: str) -> None:
     app = create_app(AppState(
         conn=conn, vault=vault, config=config, worker=worker,
         lm_client=lm_client, gallery=gallery,
+        vector_store=store, text_embedder=text_embedder,
     ))
     try:
         uvicorn.run(app, host="127.0.0.1", port=config.backend_port, log_config=None)

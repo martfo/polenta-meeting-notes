@@ -35,6 +35,8 @@ class AppState:
     worker: Worker
     lm_client: Any
     gallery: Gallery
+    vector_store: Any = None
+    text_embedder: Any = None
 
 
 class ImportRequest(BaseModel):
@@ -58,6 +60,12 @@ class CorrectionRequest(BaseModel):
 
 class NotesRequest(BaseModel):
     text: str
+
+
+class LibraryChatRequest(BaseModel):
+    question: str
+    scope: str = "folder"
+    folder: str | None = None
 
 
 class ImageRequest(BaseModel):
@@ -187,6 +195,22 @@ def create_app(state: AppState) -> FastAPI:
             vault, meeting_id, base64.b64decode(request.data_base64), request.suffix
         )
         return {"path": relative}
+
+    @app.post("/library/chat")
+    def library_chat(request: LibraryChatRequest) -> dict:
+        if state.vector_store is None or state.text_embedder is None:
+            raise HTTPException(501, "library search is not set up on this install")
+        from meetingnotes.llm.librarychat import ChatScope, ask_library
+
+        scope = ChatScope(request.scope)
+        folder = fol.folder_id(conn, request.folder) if request.folder else None
+        if scope is ChatScope.FOLDER and folder is None:
+            raise HTTPException(422, "folder scope needs an existing folder name")
+        result = ask_library(
+            state.lm_client, state.vector_store, state.text_embedder,
+            request.question, scope=scope, folder_id=folder,
+        )
+        return {"answer": result.answer, "citations": result.citations}
 
     @app.post("/jobs/{meeting_id}/enqueue")
     def enqueue_pending(meeting_id: str) -> dict:
