@@ -38,6 +38,7 @@ struct SpeakerAssignment: Codable, Identifiable, Hashable {
 struct MeetingDetail: Codable {
     let id: String
     let title: String
+    let folder: String?
     let processing_status: String
     let summary_status: String
     let last_error: String?

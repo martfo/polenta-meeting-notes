@@ -111,8 +111,15 @@ def create_app(state: AppState) -> FastAPI:
             raise HTTPException(404, "no such meeting")
         transcript_path = vault.transcript_path(meeting_id)
         meeting_md = vault.meeting_md_path(meeting_id)
+        folder = None
+        if row["folder_id"] is not None:
+            folder_row = conn.execute(
+                "SELECT name FROM folders WHERE id = ?", (row["folder_id"],)
+            ).fetchone()
+            folder = folder_row["name"] if folder_row else None
         return {
             **dict(row),
+            "folder": folder,
             "attendees": [dict(a) for a in m.list_attendees(conn, meeting_id)],
             "transcript": transcript_path.read_text() if transcript_path.exists() else None,
             "summary": meeting_md.read_text() if meeting_md.exists() else None,

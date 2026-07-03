@@ -24,10 +24,80 @@ enum KeychainTokenStore {
     }
 }
 
+struct TokenCheck: Identifiable {
+    let id = UUID()
+    let passed: Bool
+    let message: String
+}
+
 @MainActor
 final class FirstRunModel: ObservableObject {
     @Published var state: Provisioner.State = .notStarted
     @Published var currentStep = ""
+    @Published var tokenChecks: [TokenCheck] = []
+    @Published var checkingToken = false
+
+    static let tokenPage = URL(string: "https://huggingface.co/settings/tokens")!
+    static let gatedRepos = [
+        "pyannote/speaker-diarization-community-1",
+        "pyannote/embedding",
+    ]
+
+    func storeAndVerify(token: String) {
+        tokenChecks = []
+        guard KeychainTokenStore.save(token: token) else {
+            tokenChecks = [TokenCheck(passed: false, message: "The token could not be stored in the Keychain.")]
+            return
+        }
+        checkingToken = true
+        Task {
+            defer { checkingToken = false }
+            tokenChecks = await Self.verify(token: token)
+        }
+    }
+
+    /// Live checks against Hugging Face, so a wrong token or an unaccepted
+    /// licence shows up here, not as a failed transcription later. First run
+    /// is the online step, so the network is available.
+    static func verify(token: String) async -> [TokenCheck] {
+        var checks: [TokenCheck] = []
+
+        var whoami = URLRequest(url: URL(string: "https://huggingface.co/api/whoami-v2")!)
+        whoami.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, response) = try await URLSession.shared.data(for: whoami)
+            if (response as? HTTPURLResponse)?.statusCode == 200,
+               let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let name = body["name"] as? String {
+                checks.append(TokenCheck(passed: true, message: "Token stored and accepted. Signed in as \(name)."))
+            } else {
+                checks.append(TokenCheck(
+                    passed: false,
+                    message: "Hugging Face did not accept this token. Create a Read token with the link above and paste the whole hf_ value."))
+                return checks
+            }
+        } catch {
+            checks.append(TokenCheck(passed: false, message: "Hugging Face could not be reached. Check the network and try again."))
+            return checks
+        }
+
+        for repo in gatedRepos {
+            var probe = URLRequest(url: URL(string: "https://huggingface.co/\(repo)/resolve/main/config.yaml")!)
+            probe.httpMethod = "HEAD"
+            probe.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let status = (try? await URLSession.shared.data(for: probe))
+                .flatMap { ($0.1 as? HTTPURLResponse)?.statusCode } ?? 0
+            if status == 200 {
+                checks.append(TokenCheck(passed: true, message: "Access to \(repo) is granted."))
+            } else {
+                checks.append(TokenCheck(
+                    passed: false,
+                    message: "No access to \(repo) yet. Open its page with the link above, press "
+                        + "\u{201C}Agree and access repository\u{201D}, then check again."))
+            }
+        }
+        return checks
+    }
 
     func provision() {
         let runtime = RuntimeLocation.runtimeDirectory()
@@ -52,55 +122,84 @@ final class FirstRunModel: ObservableObject {
 struct FirstRunView: View {
     @StateObject private var model = FirstRunModel()
     @State private var token = ""
-    @State private var tokenSaved = false
     let onFinished: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("First-run setup").font(.title)
-            Text("The app fetches its own backend and, on the next screen, the "
-                 + "speech models. This is the only time it uses the network.")
-                .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("First-run setup").font(.title)
+                Text("The app fetches its own backend and the speech models. This "
+                     + "is the only time it uses the network; after setup it runs "
+                     + "entirely on this Mac.")
+                    .foregroundStyle(.secondary)
 
-            GroupBox("Hugging Face token") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("The speaker model needs a Hugging Face token and a "
-                         + "one-time licence acceptance. The token is stored in "
-                         + "the macOS Keychain, never in a file.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        SecureField("hf_...", text: $token)
-                        Button("Store in Keychain") {
-                            tokenSaved = KeychainTokenStore.save(token: token)
+                GroupBox("Step 1: Hugging Face token") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("The speaker models come from Hugging Face. You need a free "
+                             + "account, a one-time acceptance of each model's terms, and a "
+                             + "Read token. The token is stored in the macOS Keychain, never "
+                             + "in a file.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Link("1. Create a free account and a Read token (huggingface.co/settings/tokens)",
+                                 destination: FirstRunModel.tokenPage)
+                            Link("2. Accept the terms for speaker-diarization-community-1",
+                                 destination: URL(string: "https://huggingface.co/pyannote/speaker-diarization-community-1")!)
+                            Link("3. Accept the terms for pyannote/embedding",
+                                 destination: URL(string: "https://huggingface.co/pyannote/embedding")!)
+                            Text("4. Paste the token below (it starts with hf_) and press Store and check.")
                         }
-                        .disabled(token.isEmpty)
-                        if tokenSaved { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
-                    }
-                }
-                .padding(6)
-            }
+                        .font(.callout)
 
-            GroupBox("Backend") {
-                VStack(alignment: .leading, spacing: 8) {
-                    switch model.state {
-                    case .notStarted:
-                        Button("Set up the backend") { model.provision() }
-                    case .inProgress:
-                        ProgressView(model.currentStep)
-                    case .ready:
-                        Label("The backend is ready.", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Button("Continue") { onFinished() }
-                    case .failed(let message):
-                        Text(message).foregroundStyle(.red).font(.caption)
-                        Button("Retry") { model.provision() }
+                        HStack {
+                            SecureField("hf_...", text: $token)
+                            Button("Store and check") {
+                                model.storeAndVerify(token: token.trimmingCharacters(in: .whitespaces))
+                            }
+                            .disabled(token.trimmingCharacters(in: .whitespaces).isEmpty || model.checkingToken)
+                            if model.checkingToken { ProgressView().controlSize(.small) }
+                        }
+
+                        ForEach(model.tokenChecks) { check in
+                            Label {
+                                Text(check.message).font(.callout)
+                            } icon: {
+                                Image(systemName: check.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .foregroundStyle(check.passed ? .green : .red)
+                            }
+                        }
                     }
+                    .padding(6)
                 }
-                .padding(6)
-                .frame(maxWidth: .infinity, alignment: .leading)
+
+                GroupBox("Step 2: the backend") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        switch model.state {
+                        case .notStarted:
+                            Text("The app installs its transcription backend into Application "
+                                 + "Support. This downloads a few gigabytes the first time.")
+                                .font(.callout).foregroundStyle(.secondary)
+                            Button("Set up the backend") { model.provision() }
+                        case .inProgress:
+                            ProgressView(model.currentStep)
+                        case .ready:
+                            Label("The backend is ready.", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Button("Continue") { onFinished() }
+                                .keyboardShortcut(.defaultAction)
+                        case .failed(let message):
+                            Text(message).foregroundStyle(.red).font(.callout)
+                            Button("Retry") { model.provision() }
+                        }
+                    }
+                    .padding(6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
+            .padding(28)
+            .frame(maxWidth: 620)
         }
-        .padding(28)
-        .frame(maxWidth: 560)
     }
 }

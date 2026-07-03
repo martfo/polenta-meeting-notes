@@ -12,6 +12,7 @@ struct MeetingDetailScreen: View {
     @State private var tab = "Summary"
     @State private var notesDraft = ""
     @State private var titleDraft: String?
+    @FocusState private var titleFocused: Bool
     @State private var chatHistory: [(question: String, answer: String)] = []
     @State private var chatQuestion = ""
     @State private var chatBusy = false
@@ -73,8 +74,15 @@ struct MeetingDetailScreen: View {
                         .textFieldStyle(.roundedBorder)
                         .font(.title2)
                         .frame(maxWidth: 420)
+                        .focused($titleFocused)
+                        .onAppear { titleFocused = true }
                         .onSubmit { saveTitle() }
                         .onExitCommand { titleDraft = nil }
+                        // Clicking away commits too; otherwise the field keeps
+                        // the text and the rename silently never happens.
+                        .onChange(of: titleFocused) { _, focused in
+                            if !focused && titleDraft != nil { saveTitle() }
+                        }
                 } else {
                     Text(detail.title)
                         .font(.title2).bold()
@@ -100,6 +108,10 @@ struct MeetingDetailScreen: View {
                     .font(.caption)
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            FolderBar(meetingID: meetingID, currentFolder: detail.folder) {
+                await reload(keepingDraft: true)
+                await model.refreshLibrary()
             }
         }
         .padding()

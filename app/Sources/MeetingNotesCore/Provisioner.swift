@@ -35,7 +35,8 @@ public enum RuntimeLocation {
 /// 4: naming a speaker refreshes transcript.md and meeting.md.
 /// 5: meetings can be renamed, and naming a speaker regenerates the summary
 ///    from the resolved transcript.
-public let runtimeVersion = "5"
+/// 6: the meeting detail carries its folder name for the filing menu.
+public let runtimeVersion = "6"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.
