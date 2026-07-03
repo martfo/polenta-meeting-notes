@@ -29,6 +29,9 @@ struct MeetingDetailScreen: View {
     @State private var chatDrawerOpen = false
     @AppStorage(Appearance.sizeKey) private var baseFontSize = Appearance.defaultSize
     @AppStorage(Appearance.designKey) private var fontDesign = "system"
+    @State private var pasteMonitor: Any?
+    @State private var showRegeneratePrompt = false
+    @State private var keepEditsChosen = false
 
     private var contentFont: Font {
         Appearance.font(size: baseFontSize, design: fontDesign)
@@ -70,9 +73,23 @@ struct MeetingDetailScreen: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: chatDrawerOpen)
+        .alert("Regenerate the summary?", isPresented: $showRegeneratePrompt) {
+            Button("Regenerate") {
+                Task {
+                    try? await model.client.regenerateSummary(meetingID)
+                    await reload(keepingDraft: true)
+                }
+            }
+            Button("Keep my edits", role: .cancel) { keepEditsChosen = true }
+        } message: {
+            Text("The notes changed, and you have edited this summary by hand. "
+                 + "Regenerating replaces your edits with a fresh summary that "
+                 + "includes the new notes.")
+        }
         .task(id: meetingID) {
             chatHistory = []
             chatDrawerOpen = false
+            keepEditsChosen = false
             await reload()
             // Keep the open meeting fresh while it is being processed, so a
             // stage change or failure shows without a click.
@@ -155,13 +172,22 @@ struct MeetingDetailScreen: View {
                     .onChange(of: notesFocused) { _, focused in
                         if !focused { saveNotes() }
                     }
-                Text("Notes save on their own and feed into the summary; they are "
-                     + "never rewritten. Paste screenshots straight in; they are "
-                     + "stored with the meeting.")
-                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text("Notes save on their own and feed into the summary; they are "
+                         + "never rewritten. Paste screenshots straight in; they are "
+                         + "stored with the meeting.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Paste image") { pasteImageFromPasteboard() }
+                        .disabled(!Self.pasteboardHasImage())
+                }
             }
             .padding()
-            .onDisappear { saveNotes() }
+            .onAppear { installPasteMonitor() }
+            .onDisappear {
+                removePasteMonitor()
+                saveNotes()
+            }
         case "Speakers":
             SpeakersTab(meetingID: meetingID, attendees: detail.attendees.map(\.name)) {
                 await reload(keepingDraft: true)
@@ -244,7 +270,19 @@ struct MeetingDetailScreen: View {
         let text = notesDraft
         guard text != lastSavedNotes else { return }
         lastSavedNotes = text
-        Task { try? await model.client.saveNotes(meetingID, text: text) }
+        Task {
+            if let action = try? await model.client.saveNotes(meetingID, text: text) {
+                handleSummaryAction(action)
+            }
+        }
+    }
+
+    private func handleSummaryAction(_ action: String) {
+        // "regenerating" needs nothing: the poll shows the stage. "prompt"
+        // asks once; choosing to keep the edits stays chosen for this meeting.
+        if action == "prompt" && !keepEditsChosen {
+            showRegeneratePrompt = true
+        }
     }
 
     private func saveSummary() {
@@ -284,6 +322,35 @@ struct MeetingDetailScreen: View {
         return summary
     }
 
+    static func pasteboardHasImage() -> Bool {
+        NSPasteboard.general.canReadItem(withDataConformingToTypes: [
+            UTType.png.identifier, UTType.tiff.identifier,
+        ])
+    }
+
+    /// The text view underneath TextEditor consumes paste itself and drops
+    /// image data on the floor, so onPasteCommand never fires. While the
+    /// notes tab is open, a local key monitor routes an image-carrying paste
+    /// here; plain text pasting stays native.
+    private func installPasteMonitor() {
+        guard pasteMonitor == nil else { return }
+        pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.modifierFlags.contains(.command),
+                  event.charactersIgnoringModifiers?.lowercased() == "v",
+                  Self.pasteboardHasImage()
+            else { return event }
+            pasteImageFromPasteboard()
+            return nil
+        }
+    }
+
+    private func removePasteMonitor() {
+        if let pasteMonitor {
+            NSEvent.removeMonitor(pasteMonitor)
+        }
+        pasteMonitor = nil
+    }
+
     private func pasteImageFromPasteboard() {
         let pasteboard = NSPasteboard.general
         let png = pasteboard.data(forType: .png)
@@ -293,12 +360,16 @@ struct MeetingDetailScreen: View {
         guard let png else { return }
         Task {
             // Typed text first, so the backend appends the image link after it.
-            try? await model.client.saveNotes(meetingID, text: notesDraft)
-            _ = try? await model.client.pasteImage(meetingID, data: png)
+            lastSavedNotes = notesDraft
+            _ = try? await model.client.saveNotes(meetingID, text: notesDraft)
+            let result = try? await model.client.pasteImage(meetingID, data: png)
             if let fresh = try? await model.client.meeting(meetingID) {
                 detail = fresh
                 notesDraft = fresh.notes
                 lastSavedNotes = fresh.notes
+            }
+            if let result {
+                handleSummaryAction(result.summaryAction)
             }
         }
     }

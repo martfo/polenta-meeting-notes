@@ -101,9 +101,12 @@ Folders are flat. A meeting belongs to exactly one folder.
 - folders(id, name, created_at)
 - meetings(id, title, folder_id, started_at, duration_s, source, vault_path,
   processing_status, summary_status, last_error, failed_stage, expected_speakers,
-  created_at). last_error and failed_stage hold the plain-language failure record shown
-  in the library, and Retry re-enqueues from failed_stage. expected_speakers is the
-  optional count passed to diarisation.
+  summary_edited, created_at). last_error and failed_stage hold the plain-language
+  failure record shown in the library, and Retry re-enqueues from failed_stage.
+  expected_speakers is the optional count passed to diarisation. summary_edited marks a
+  summary the user has changed by hand: a machine summary regenerates on its own when
+  the notes change, an edited one only after the user agrees, and speaker renames are
+  always patched into the body in place rather than regenerated.
 - attendees(id, meeting_id, name, email, from_calendar)
 - speakers(id, name, created_at)
 - voiceprints(id, speaker_id, kind, embedding_ref, source_meeting_id, flagged,

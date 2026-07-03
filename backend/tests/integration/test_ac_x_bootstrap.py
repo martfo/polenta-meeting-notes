@@ -105,6 +105,53 @@ def test_meeting_rename_and_speaker_naming_refresh(conn, vault, stages, fixtures
     assert queued == 0
 
 
+def test_notes_change_summary_regeneration_rules(conn, vault, stages, fixtures_dir):
+    """A notes change regenerates a machine summary on its own; an edited
+    summary is the user's document, so the app is told to ask first."""
+    import httpx
+
+    from meetingnotes.storage.frontmatter import write_meeting_md
+    from tests.conftest import make_meeting
+
+    def lm_ready(request):
+        return httpx.Response(200, json={"data": [{"id": "qwen", "state": "loaded"}]})
+
+    meeting_id = make_meeting(conn, vault)
+
+    def queued_summarise():
+        return conn.execute(
+            "SELECT COUNT(*) FROM processing_jobs WHERE meeting_id = ? "
+            "AND stage = 'summarise' AND status = 'queued'", (meeting_id,),
+        ).fetchone()[0]
+
+    with TestClient(make_app(conn, vault, stages, lm_ready)) as client:
+        # No summary yet: a notes change triggers nothing.
+        response = client.put(f"/meetings/{meeting_id}/notes", json={"text": "early note"})
+        assert response.json()["summary_action"] == "none"
+        assert queued_summarise() == 0
+
+        # A machine summary follows the notes automatically, deduped.
+        write_meeting_md(vault.meeting_md_path(meeting_id), {"id": meeting_id}, "Machine summary.")
+        for text in ("first change", "second change"):
+            response = client.put(f"/meetings/{meeting_id}/notes", json={"text": text})
+            assert response.json()["summary_action"] == "regenerating"
+        assert queued_summarise() == 1
+
+        # The user edits the summary: from then on, ask first.
+        client.put(f"/meetings/{meeting_id}/summary", json={"body": "My edited summary."})
+        response = client.put(f"/meetings/{meeting_id}/notes", json={"text": "third change"})
+        assert response.json()["summary_action"] == "prompt"
+        assert queued_summarise() == 1, "nothing new queued behind the user's back"
+
+        # The user confirms: the edit flag clears and a regeneration queues.
+        client.post(f"/meetings/{meeting_id}/regenerate-summary")
+
+    from meetingnotes.storage import meetings as m
+
+    assert m.get_meeting(conn, meeting_id)["summary_edited"] == 0
+    assert queued_summarise() == 2
+
+
 def test_attendee_prefill_endpoint(conn, vault, stages):
     """Attendees from a calendar invite land on the meeting, marked as from
     the calendar, deduplicated, and visible in the detail the app reads."""

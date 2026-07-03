@@ -100,8 +100,17 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         let _: [String: AnyDecodable] = try await put("/meetings/\(id)/summary", body: ["body": body])
     }
 
-    func saveNotes(_ id: String, text: String) async throws {
-        let _: [String: AnyDecodable] = try await put("/meetings/\(id)/notes", body: ["text": text])
+    /// Returns the backend's summary decision: none, regenerating, or prompt
+    /// (the summary is hand-edited, so ask before replacing it).
+    @discardableResult
+    func saveNotes(_ id: String, text: String) async throws -> String {
+        struct Response: Codable { let saved: Bool; let summary_action: String }
+        let response: Response = try await put("/meetings/\(id)/notes", body: ["text": text])
+        return response.summary_action
+    }
+
+    func regenerateSummary(_ id: String) async throws {
+        let _: [String: AnyDecodable] = try await post("/meetings/\(id)/regenerate-summary", body: nil)
     }
 
     func folders() async throws -> [String] {
@@ -118,13 +127,13 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         return suggestion.folder
     }
 
-    func pasteImage(_ id: String, data: Data, suffix: String = "png") async throws -> String {
+    func pasteImage(_ id: String, data: Data, suffix: String = "png") async throws -> (path: String, summaryAction: String) {
         struct Payload: Encodable { let data_base64: String; let suffix: String }
-        struct Response: Codable { let path: String }
+        struct Response: Codable { let path: String; let summary_action: String }
         let response: Response = try await send(
             "POST", "/meetings/\(id)/notes/image",
             encodable: Payload(data_base64: data.base64EncodedString(), suffix: suffix))
-        return response.path
+        return (response.path, response.summary_action)
     }
 
     func setAttendees(_ id: String, attendees: [MeetingAttendee]) async throws {

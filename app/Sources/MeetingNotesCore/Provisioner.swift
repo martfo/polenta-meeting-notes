@@ -41,7 +41,9 @@ public enum RuntimeLocation {
 ///    library chat knows the resolved names.
 /// 9: editable summaries with in-place name patching, and multi-turn chat.
 /// 10: library chat cites only the meetings the answer drew on.
-public let runtimeVersion = "10"
+/// 11: notes changes regenerate machine summaries and ask before touching
+///     edited ones.
+public let runtimeVersion = "11"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

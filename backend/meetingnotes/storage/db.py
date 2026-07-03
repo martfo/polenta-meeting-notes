@@ -83,6 +83,12 @@ MIGRATIONS: list[str] = [
         value TEXT NOT NULL
     );
     """,
+    # 2: whether the user has edited the summary body by hand. An edited
+    # summary is never regenerated without asking; a machine summary follows
+    # the notes automatically.
+    """
+    ALTER TABLE meetings ADD COLUMN summary_edited INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 PROCESSING_STATUSES = {

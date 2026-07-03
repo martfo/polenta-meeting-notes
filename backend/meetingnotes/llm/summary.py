@@ -126,6 +126,9 @@ def summarise_meeting(
     prompt_template = vault.summary_prompt_path.read_text()
     result = generate_summary_text(client, prompt_template, transcript, notes, ocr_texts, allowlist)
     m.set_summary_status(conn, meeting_id, result.status)
+    # A fresh machine summary: any earlier hand edits are gone by definition.
+    conn.execute("UPDATE meetings SET summary_edited = 0 WHERE id = ?", (meeting_id,))
+    conn.commit()
     front = meeting_front_matter(conn, meeting_id, summary_status=result.status)
     write_meeting_md(vault.meeting_md_path(meeting_id), front, result.body)
     return result

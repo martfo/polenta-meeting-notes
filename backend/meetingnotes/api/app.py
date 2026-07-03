@@ -267,6 +267,8 @@ def create_app(state: AppState) -> FastAPI:
             meeting_front_matter(conn, meeting_id),
             request.body,
         )
+        conn.execute("UPDATE meetings SET summary_edited = 1 WHERE id = ?", (meeting_id,))
+        conn.commit()
         return {"saved": True}
 
     @app.post("/meetings/{meeting_id}/attendees")
@@ -297,17 +299,49 @@ def create_app(state: AppState) -> FastAPI:
         refresh_meeting_files(conn, vault, meeting_id)
         return {"title": title}
 
+    def _enqueue_summarise(meeting_id: str) -> None:
+        queued = conn.execute(
+            "SELECT COUNT(*) FROM processing_jobs WHERE meeting_id = ? "
+            "AND stage = 'summarise' AND status = 'queued'",
+            (meeting_id,),
+        ).fetchone()[0]
+        if queued == 0:
+            q.enqueue(conn, meeting_id, stage="summarise")
+        state.worker.notify()
+
+    def _summary_action_for_notes_change(meeting_id: str) -> str:
+        """Notes feed the summary, so a notes change means the summary is
+        stale. A machine summary regenerates on its own; an edited one is the
+        user's document, so the app asks first. Returns one of: none,
+        regenerating, prompt."""
+        if not vault.meeting_md_path(meeting_id).exists():
+            return "none"  # no summary yet; the pipeline will use the notes
+        row = m.get_meeting(conn, meeting_id)
+        if row["summary_edited"]:
+            return "prompt"
+        _enqueue_summarise(meeting_id)
+        return "regenerating"
+
     @app.put("/meetings/{meeting_id}/notes")
     def save_notes(meeting_id: str, request: NotesRequest) -> dict:
         write_notes(vault, meeting_id, request.text)
-        return {"saved": True}
+        return {"saved": True, "summary_action": _summary_action_for_notes_change(meeting_id)}
 
     @app.post("/meetings/{meeting_id}/notes/image")
     def add_image(meeting_id: str, request: ImageRequest) -> dict:
         relative = paste_image(
             vault, meeting_id, base64.b64decode(request.data_base64), request.suffix
         )
-        return {"path": relative}
+        return {"path": relative, "summary_action": _summary_action_for_notes_change(meeting_id)}
+
+    @app.post("/meetings/{meeting_id}/regenerate-summary")
+    def regenerate_summary(meeting_id: str) -> dict:
+        """The user chose to replace their edited summary with a fresh one."""
+        m.get_meeting(conn, meeting_id)
+        conn.execute("UPDATE meetings SET summary_edited = 0 WHERE id = ?", (meeting_id,))
+        conn.commit()
+        _enqueue_summarise(meeting_id)
+        return {"regenerating": True}
 
     @app.post("/library/chat")
     def library_chat(request: LibraryChatRequest) -> dict:
