@@ -25,10 +25,14 @@ public enum RuntimeLocation {
 }
 
 /// The marker's content; bump to force re-provisioning after a breaking
-/// runtime change.
+/// runtime change. Re-provisioning over a complete runtime is quick: the
+/// Python build and the dependencies are already in place, so only the
+/// backend package reinstalls.
 /// 2: the backend is installed with the pipeline and embeddings extras, so
 ///    transcription and library search work in the installed app.
-public let runtimeVersion = "2"
+/// 3: backend fixes: the bge-m3 repo id resolves, and the backend exits with
+///    its parent app instead of lingering as an orphan.
+public let runtimeVersion = "3"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

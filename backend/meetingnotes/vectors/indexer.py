@@ -25,9 +25,13 @@ class BgeM3Embedder:
     """The real embedder, run inside the backend so it never occupies the LM
     Studio model slot. Heavy import, deferred; vectors L2 normalised."""
 
-    def __init__(self, model_name: str = "BAAI/bge-m3"):
+    def __init__(self, model_name: str = "bge-m3"):
         from FlagEmbedding import BGEM3FlagModel
 
+        # config.json pins the short name bge-m3; the Hugging Face repo id
+        # carries the owner prefix.
+        if "/" not in model_name:
+            model_name = f"BAAI/{model_name}"
         self._model = BGEM3FlagModel(model_name, use_fp16=False)
 
     def embed_texts(self, texts: list[str]) -> np.ndarray:
