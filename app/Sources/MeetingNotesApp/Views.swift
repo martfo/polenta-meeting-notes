@@ -23,7 +23,17 @@ struct MeetingNotesApp: App {
 
 struct RootView: View {
     @EnvironmentObject var model: AppModel
-    @State private var needsFirstRun = BackendSupervisor.pythonExecutable() == nil
+    @State private var needsFirstRun = RootView.firstRunNeeded()
+
+    /// First run is decided by the provisioning marker and its version, not
+    /// by whether some runtime happens to exist: an outdated runtime must be
+    /// provisioned over, not reused.
+    static func firstRunNeeded() -> Bool {
+        if ProcessInfo.processInfo.environment["MEETINGNOTES_BACKEND_PYTHON"] != nil {
+            return false  // a development checkout supplies its own backend
+        }
+        return Provisioner.isFirstRun(runtime: RuntimeLocation.runtimeDirectory())
+    }
 
     var body: some View {
         if model.vaultURL == nil {

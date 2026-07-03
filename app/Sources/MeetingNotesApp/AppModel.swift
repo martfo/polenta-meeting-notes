@@ -62,7 +62,18 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+        // Processing happens in the background, so the library keeps itself
+        // fresh rather than showing stale statuses until the next click.
+        libraryPoll?.cancel()
+        libraryPoll = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3))
+                await refreshLibrary()
+            }
+        }
     }
+
+    private var libraryPoll: Task<Void, Never>?
 
     func refreshLibrary() async {
         library = (try? await client.library()) ?? library

@@ -29,12 +29,23 @@ struct MeetingDetailScreen: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .task(id: meetingID) { await reload() }
+        .task(id: meetingID) {
+            await reload()
+            // Keep the open meeting fresh while it is being processed, so a
+            // stage change or failure shows without a click.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                await reload(keepingDraft: true)
+            }
+        }
     }
 
-    private func reload() async {
-        detail = try? await model.client.meeting(meetingID)
-        notesDraft = detail?.notes ?? ""
+    private func reload(keepingDraft: Bool = false) async {
+        guard let fresh = try? await model.client.meeting(meetingID) else { return }
+        detail = fresh
+        if !keepingDraft || notesDraft.isEmpty {
+            notesDraft = fresh.notes
+        }
     }
 
     @ViewBuilder
