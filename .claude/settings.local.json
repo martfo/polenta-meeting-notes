@@ -28,7 +28,11 @@
       "Bash(make gate-app *)",
       "Bash(swift build *)",
       "Bash(echo \"exit: $?\")",
-      "Bash(make gate *)"
+      "Bash(make gate *)",
+      "Bash(chmod +x \"/Users/dtrb/Work/Dtrb/Code projects/mieliepap/scripts/\"*.sh)",
+      "Bash(rm unit/test_ac_3_4_dmg_contents.py integration/test_ac_3_4_dmg_staging.py)",
+      "Read(//Users/dtrb/Work/Dtrb/Code projects/**)",
+      "Bash(SKIP_SIGNING=1 make dmg)"
     ]
   }
 }

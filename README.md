@@ -92,7 +92,25 @@ Known American spellings are changed to British automatically, and a bundled Bri
 quietly flags anything it does not recognise without changing names, technical terms, or code.
 This runs on the machine and needs no network.
 
-## Running the checks
+## Setting up a new Mac
+
+In this order:
+
+1. Install LM Studio, load a model (a non-thinking instruct model works best), and make
+   sure its local server is on, on port 1234.
+2. Open the MeetingNotes .dmg and drag the app to Applications.
+3. Right-click the app in Applications and choose Open, then Open again. This one-time
+   step is needed because the app is signed locally rather than notarised.
+4. Pick where the vault should live, or point at an existing vault to open it as it is.
+5. Paste your Hugging Face token (stored in the Keychain) and let the app fetch its
+   backend and download the speech models. This first run is the only time the app uses
+   the network.
+6. Record or import a test meeting and watch it process through to a summary.
+
+## Building and checking
 
 `make gate` runs the fast test suite and is the single measure of a healthy build. The slower
-tests that run the real transcription models run at the end of each phase.
+tests that run the real transcription models run at phase boundaries with `make pipeline`,
+and `make live-smoke` exercises a real loaded model on demand. `make dmg` builds the
+installer; signing needs the one-off local certificate from scripts/make_signing_cert.sh.
+The manual hardware checklist lives at docs/MANUAL_CHECKLIST.md.

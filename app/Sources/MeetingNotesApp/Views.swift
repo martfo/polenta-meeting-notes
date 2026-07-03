@@ -23,10 +23,16 @@ struct MeetingNotesApp: App {
 
 struct RootView: View {
     @EnvironmentObject var model: AppModel
+    @State private var needsFirstRun = BackendSupervisor.pythonExecutable() == nil
 
     var body: some View {
         if model.vaultURL == nil {
             VaultPicker()
+        } else if needsFirstRun {
+            FirstRunView {
+                needsFirstRun = false
+                model.bootBackend()
+            }
         } else {
             MainSplit()
         }

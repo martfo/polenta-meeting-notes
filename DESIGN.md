@@ -39,24 +39,33 @@ meeting-notes/
   app/
     Sources/
     Tests/                     named by AC id
+  docs/MANUAL_CHECKLIST.md     the [manual-hardware] checklist
+  scripts/                     build_app.sh, build_dmg.sh, make_signing_cert.sh
+  app/
+    Support/                   Info.plist and MeetingNotes.entitlements
   backend/
     pyproject.toml
+    scripts/                   build_british_map.py, make_fixtures.py
     meetingnotes/
       api/                     FastAPI routes
       pipeline/                whisperx transcription and diarisation
-      enrolment/               matching, gallery, provenance
-      storage/                 sqlite, vault, markdown read and write
-      jobs/                    processing queue and worker
-      llm/                     LM Studio client, summary, chat
-      language/                em dash strip, British pass, dictionary flag
+      enrolment/               matching, gallery, provenance, management
+      storage/                 sqlite, vault, markdown read and write, keychain
+      jobs/                    processing queue, worker, stages, import
+      llm/                     LM Studio client, summary, chat, folders, library chat
+      language/                em dash strip, British pass, dictionary flag, lint
       logging/                 log setup and helpers
+      notes/                   notes.md, pasted images, OCR
+      vectors/                 chunking, LanceDB store, bge-m3 indexer
+      calendar/                read-only client and meeting detection
       resources/               american_to_british.json, technical_allowlist.txt,
-                               summary_prompt.md default
+                               summary_prompt.md default, dict/en_GB
       config.py
     tests/
       unit/
       integration/
-      pipeline/
+      pipeline/                plus live smoke, run on demand
+      manual/                  always-skipped placeholders for the checklist
   fixtures/
     audio/
     segments/
@@ -91,22 +100,33 @@ Folders are flat. A meeting belongs to exactly one folder.
 
 - folders(id, name, created_at)
 - meetings(id, title, folder_id, started_at, duration_s, source, vault_path,
-  processing_status, summary_status, created_at)
+  processing_status, summary_status, last_error, failed_stage, expected_speakers,
+  created_at). last_error and failed_stage hold the plain-language failure record shown
+  in the library, and Retry re-enqueues from failed_stage. expected_speakers is the
+  optional count passed to diarisation.
 - attendees(id, meeting_id, name, email, from_calendar)
 - speakers(id, name, created_at)
-- voiceprints(id, speaker_id, kind, embedding_ref, source_meeting_id, created_at),
-  kind is positive or negative
+- voiceprints(id, speaker_id, kind, embedding_ref, source_meeting_id, flagged,
+  created_at), kind is positive or negative. flagged marks the stored positive that
+  drove a false match, surfaced for review and removal.
 - meeting_speakers(id, meeting_id, diarised_label, speaker_id, display_name, confirmed,
-  assigned_by, matched_voiceprint_id, match_score), assigned_by is enrolment, attendee,
-  or manual
+  assigned_by, matched_voiceprint_id, match_score, cluster_embedding_ref), assigned_by
+  is enrolment, attendee, or manual. cluster_embedding_ref keeps the cluster voiceprint
+  so a later confirmation or correction can teach the gallery.
 - processing_jobs(id, meeting_id, stage, status, attempts, last_error, created_at,
-  updated_at), status is queued, running, done, or failed
-- settings(key, value)
+  updated_at), status is queued, running, done, or failed. A job's stage is the stage to
+  start from, which is how Retry resumes mid-pipeline.
+- settings(key, value). Values here override config.json for audio_retention_days,
+  match_threshold, and veto_margin, so the app can tune them without rewriting the file.
 
 processing_status values: recording, queued, transcribing, diarising, enriching,
-summarising, ready, needs_attention, failed.
+summarising, ready, needs_attention, failed. The embed stage shows enriching, because
+the pinned status set has no embedding entry.
 
 summary_status values: pending, ready, needs_attention.
+
+Embedding vectors are not stored in SQLite: each voiceprint is a JSON file under
+speakers/ and embedding_ref is its file name.
 
 ## LanceDB
 
@@ -210,6 +230,14 @@ Correcting a wrong auto-assignment records the cluster voiceprint as a negative 
 against the wrongly matched speaker, adds it as a positive example only to the correct
 speaker, and flags the positive voiceprint that drove the false match for review and removal.
 
+## Capture staging and the backend-down path
+
+The app mixes each recording to one 16 kHz mono WAV and writes it to
+MeetingVault/captures/ before telling the backend anything, so capture never depends on
+the backend being up. Import then copies the audio into the meeting folder. If the
+backend is unreachable at Stop, the pending recording is recorded in
+settings/pending_recordings.json and enqueued when the backend returns.
+
 ## Processing queue
 
 Capture and import both write audio to the vault and enqueue a job, then return at once. One
@@ -240,9 +268,38 @@ id and stage where relevant, and a plain message. A companion file holds one JSO
 line. Logs never contain transcript or summary text. Levels are set by log_level. The app uses
 unified logging and mirrors errors to the same file.
 
+## Packaging and provisioning
+
+- The runtime is provisioned on first run into
+  ~/Library/Application Support/MeetingNotes/runtime, separate from the vault: a bundled
+  uv binary fetches a standalone CPython 3.11, creates runtime/venv, and installs the
+  backend copy that ships inside the app bundle at Contents/Resources/backend. A
+  .provisioned marker holding the runtime version is written only after a complete run,
+  so a partial install is always detected and run over.
+- scripts/build_app.sh assembles dist/MeetingNotes.app from the SwiftPM build,
+  Support/Info.plist (which carries NSAudioCaptureUsageDescription and
+  NSMicrophoneUsageDescription), the language resources, the backend copy, and uv, then
+  signs inside out with the local identity "MeetingNotes Local Signing" and
+  Support/MeetingNotes.entitlements. scripts/make_signing_cert.sh is the documented
+  one-off that creates the identity. SKIP_SIGNING=1 skips signing for unsigned test
+  builds.
+- scripts/build_dmg.sh stages the app, an Applications symlink, and a short read-me with
+  the right-click Open step, then builds dist/MeetingNotes.dmg with hdiutil. make dmg
+  runs both scripts. Model weights never ship in the dmg.
+- The Hugging Face token lives in the Keychain under service MeetingNotes, account
+  huggingface-token; the Swift app writes it with SecItemAdd and the backend reads it
+  with the security command.
+
+## Toolchain notes
+
+On a machine with only the Command Line Tools, Swift Testing's framework lives outside
+SwiftPM's default search path; the Makefile's gate-app target adds the search-path and
+rpath flags and disables cross-import overlays. With full Xcode installed the flags
+collapse to nothing.
+
 ## Definition of done
 
 make gate runs every unit, integration-fixture, and contract-mock test and is the single
-meaning of green. The pipeline tier runs at phase boundaries. The manual hardware checklist is
-run once on a real Mac. A feature is complete when its acceptance criteria tests pass and the
-fast gate still passes.
+meaning of green. The pipeline tier runs at phase boundaries. The manual hardware checklist
+(docs/MANUAL_CHECKLIST.md) is run once on a real Mac. A feature is complete when its
+acceptance criteria tests pass and the fast gate still passes.
