@@ -12,7 +12,7 @@ gate-backend:
 # directory SwiftPM does not search by default. With full Xcode installed the
 # directory is absent and the flags collapse to nothing.
 CLT_FRAMEWORKS := /Library/Developer/CommandLineTools/Library/Developer/Frameworks
-SWIFT_TEST_FLAGS := $(shell test -d $(CLT_FRAMEWORKS) && echo "-Xswiftc -F -Xswiftc $(CLT_FRAMEWORKS) -Xlinker -F -Xlinker $(CLT_FRAMEWORKS) -Xlinker -rpath -Xlinker $(CLT_FRAMEWORKS)")
+SWIFT_TEST_FLAGS := $(shell test -d $(CLT_FRAMEWORKS) && echo "-Xswiftc -F -Xswiftc $(CLT_FRAMEWORKS) -Xswiftc -Xfrontend -Xswiftc -disable-cross-import-overlays -Xlinker -F -Xlinker $(CLT_FRAMEWORKS) -Xlinker -rpath -Xlinker $(CLT_FRAMEWORKS)")
 
 gate-app:
 	cd app && swift test $(SWIFT_TEST_FLAGS)
