@@ -47,11 +47,35 @@ final class BackendSupervisor: ObservableObject {
     }
 
     func start() {
+        terminateOrphan()
         launchProcess()
         monitorTask = Task { [weak self] in
             while let self, !Task.isCancelled {
                 await self.checkHealth()
                 try? await Task.sleep(for: .seconds(3))
+            }
+        }
+    }
+
+    /// A previous app run (or version) may have left its backend serving on
+    /// the port. It runs stale code with a stale environment, so it is
+    /// replaced, never adopted.
+    private func terminateOrphan() {
+        guard process == nil else { return }
+        let port = client.baseURL.port ?? 8765
+        let lsof = Process()
+        lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        lsof.arguments = ["-ti", "tcp:\(port)"]
+        let stdout = Pipe()
+        lsof.standardOutput = stdout
+        lsof.standardError = Pipe()
+        guard (try? lsof.run()) != nil else { return }
+        lsof.waitUntilExit()
+        let output = String(
+            data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        for line in output.split(separator: "\n") {
+            if let pid = Int32(line.trimmingCharacters(in: .whitespaces)), pid != ProcessInfo.processInfo.processIdentifier {
+                kill(pid, SIGTERM)
             }
         }
     }

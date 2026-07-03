@@ -50,6 +50,13 @@ final class AppModel: ObservableObject {
         self.supervisor = supervisor
         supervisor.start()
 
+        // The backend is a child of this app and stops with it.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak supervisor] _ in
+            MainActor.assumeIsolated { supervisor?.stop() }
+        }
+
         Task {
             // Give the backend a moment, then load the library and enqueue
             // anything captured while it was down.

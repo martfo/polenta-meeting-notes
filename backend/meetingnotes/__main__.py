@@ -23,6 +23,25 @@ class _Lazy:
         return getattr(self._obj, name)
 
 
+def _exit_with_parent() -> None:
+    """The backend is a supervised child of the app and must never outlive
+    it: an orphan keeps the port and answers the next app version with stale
+    code. When the parent dies we are reparented to launchd (pid 1)."""
+    import os
+    import threading
+    import time
+
+    parent = os.getppid()
+
+    def watch() -> None:
+        while True:
+            time.sleep(2.0)
+            if parent != 1 and os.getppid() == 1:
+                os._exit(0)
+
+    threading.Thread(target=watch, name="parent-watchdog", daemon=True).start()
+
+
 def main(config_path: str) -> None:
     import uvicorn
 
@@ -38,6 +57,7 @@ def main(config_path: str) -> None:
     from meetingnotes.storage.keychain import read_hf_token
     from meetingnotes.storage.vault import Vault
 
+    _exit_with_parent()
     config = load_config(Path(config_path))
     vault = Vault(config.vault_path).ensure()
     configure_logging(vault.logs_dir, config.log_level)
