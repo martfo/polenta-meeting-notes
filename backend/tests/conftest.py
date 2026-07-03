@@ -56,3 +56,33 @@ class RecordingStages(dict):
 @pytest.fixture
 def stages() -> RecordingStages:
     return RecordingStages()
+
+
+@pytest.fixture
+def vectors():
+    """The controlled embedding vectors for the enrolment tests."""
+    import json
+
+    import numpy as np
+
+    raw = json.loads((FIXTURES / "embeddings" / "controlled_vectors.json").read_text())
+    return {name: np.array(values) for name, values in raw.items()}
+
+
+@pytest.fixture
+def gallery(conn, vault):
+    from meetingnotes.enrolment.gallery import Gallery
+
+    return Gallery(conn, vault)
+
+
+def make_meeting(conn, vault, meeting_id="2026-07-02_1400_client-review", title="Client review"):
+    """A bare meeting row plus its folder on disk, for tests that need one."""
+    from meetingnotes.storage import meetings as m
+
+    vault.meeting_dir(meeting_id).mkdir(parents=True, exist_ok=True)
+    m.create_meeting(
+        conn, meeting_id, title=title, started_at="2026-07-02T14:00:00+01:00",
+        vault_path=str(vault.meeting_dir(meeting_id)),
+    )
+    return meeting_id
