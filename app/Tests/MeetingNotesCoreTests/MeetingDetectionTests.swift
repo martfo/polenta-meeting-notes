@@ -16,18 +16,39 @@ struct MeetingDetectionTests {
         #expect(!MeetingDetection.isDue(start: start, now: start.addingTimeInterval(3_000)), "long started")
     }
 
-    @Test("a call app only triggers while the microphone is actually held open")
+    @Test("a call prompt fires on a change, never on a steady state")
     func test_call_app_detection() {
+        let slack = ["Finder", "Slack", "Dock"]
+
         // Slack sitting idle in the Dock is not a call.
-        #expect(MeetingDetection.runningCallApp(
-            processNames: ["Finder", "Slack", "Dock"], microphoneInUse: false) == nil)
-        // Slack plus a live microphone is.
-        #expect(MeetingDetection.runningCallApp(
-            processNames: ["Finder", "Slack", "Dock"], microphoneInUse: true) == "Slack")
-        #expect(MeetingDetection.runningCallApp(
-            processNames: ["Finder", "zoom.us"], microphoneInUse: true) == "zoom.us")
-        // A busy microphone without a call app (dictation, say) is not either.
-        #expect(MeetingDetection.runningCallApp(
-            processNames: ["Finder", "Safari"], microphoneInUse: true) == nil)
+        #expect(MeetingDetection.callPromptTrigger(
+            processNames: slack, microphoneInUse: false,
+            previousMicrophoneInUse: false, previousCallApps: ["Slack"]) == nil)
+
+        // Joining a huddle: the microphone goes live with Slack around.
+        #expect(MeetingDetection.callPromptTrigger(
+            processNames: slack, microphoneInUse: true,
+            previousMicrophoneInUse: false, previousCallApps: ["Slack"]) == "Slack")
+
+        // A machine where something holds the microphone all day: Slack
+        // running is a steady state and never prompts by itself.
+        #expect(MeetingDetection.callPromptTrigger(
+            processNames: slack, microphoneInUse: true,
+            previousMicrophoneInUse: true, previousCallApps: ["Slack"]) == nil)
+
+        // But Zoom launching into that steady busy state does prompt.
+        #expect(MeetingDetection.callPromptTrigger(
+            processNames: slack + ["zoom.us"], microphoneInUse: true,
+            previousMicrophoneInUse: true, previousCallApps: ["Slack"]) == "zoom.us")
+
+        // The first sample after launch is a baseline, not a change.
+        #expect(MeetingDetection.callPromptTrigger(
+            processNames: slack, microphoneInUse: true,
+            previousMicrophoneInUse: nil, previousCallApps: ["Slack"]) == nil)
+
+        // A busy microphone without a call app (dictation, say) never fires.
+        #expect(MeetingDetection.callPromptTrigger(
+            processNames: ["Finder", "Safari"], microphoneInUse: true,
+            previousMicrophoneInUse: false, previousCallApps: []) == nil)
     }
 }

@@ -20,11 +20,22 @@ public enum MeetingDetection {
         "zoom.us", "Microsoft Teams", "Teams", "Slack", "FaceTime", "webexmta",
     ]
 
-    /// In a call, not merely running: a call app counts only while something
-    /// is actually holding the microphone open, which every live call does,
-    /// muted or not.
-    public static func runningCallApp(processNames: [String], microphoneInUse: Bool) -> String? {
+    /// In a call, not merely running, detected on the change rather than the
+    /// state: a prompt fires when the microphone becomes busy while a call
+    /// app runs, or a call app appears while the microphone is busy. A
+    /// steadily busy microphone (Siri listening, another resident app) never
+    /// triggers on its own, so an idle Slack cannot keep prompting.
+    public static func callPromptTrigger(
+        processNames: [String], microphoneInUse: Bool,
+        previousMicrophoneInUse: Bool?, previousCallApps: Set<String>
+    ) -> String? {
         guard microphoneInUse else { return nil }
-        return processNames.first { callAppNames.contains($0) }
+        let apps = processNames.filter { callAppNames.contains($0) }
+        // The microphone just went live with a call app around.
+        if previousMicrophoneInUse == false, let app = apps.first {
+            return app
+        }
+        // A call app just appeared while the microphone is live.
+        return apps.first { !previousCallApps.contains($0) }
     }
 }

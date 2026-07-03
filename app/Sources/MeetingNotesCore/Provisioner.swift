@@ -43,7 +43,8 @@ public enum RuntimeLocation {
 /// 10: library chat cites only the meetings the answer drew on.
 /// 11: notes changes regenerate machine summaries and ask before touching
 ///     edited ones.
-public let runtimeVersion = "11"
+/// 12: meetings can be deleted, and call detection triggers on changes only.
+public let runtimeVersion = "12"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

@@ -147,6 +147,27 @@ def create_app(state: AppState) -> FastAPI:
             "reveal_path": str(vault.meeting_dir(meeting_id)),
         }
 
+    @app.delete("/meetings/{meeting_id}")
+    def delete_meeting(meeting_id: str) -> dict:
+        """Remove the meeting entirely: the database rows (cascading to
+        attendees, speakers-in-meeting, and jobs), the search chunks, and the
+        meeting's folder in the vault. Enrolled voices stay in the gallery."""
+        import shutil
+
+        try:
+            m.get_meeting(conn, meeting_id)
+        except KeyError:
+            raise HTTPException(404, "no such meeting")
+        if state.vector_store is not None:
+            try:
+                state.vector_store.delete_meeting(meeting_id)
+            except Exception:
+                pass  # the index row is derived data; the delete must not block
+        conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
+        conn.commit()
+        shutil.rmtree(vault.meeting_dir(meeting_id), ignore_errors=True)
+        return {"deleted": True}
+
     @app.post("/meetings/{meeting_id}/retry")
     def retry(meeting_id: str) -> dict:
         job_id = retry_meeting(conn, meeting_id)

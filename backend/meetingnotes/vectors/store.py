@@ -60,6 +60,11 @@ class VectorStore:
             query = query.where(f"folder_id = {int(folder_id)}")
         return query.to_list()
 
+    def delete_meeting(self, meeting_id: str) -> None:
+        table = self._table()
+        if table is not None:
+            table.delete(f"meeting_id = '{meeting_id}'")
+
     def rows_for_meeting(self, meeting_id: str) -> list[dict[str, Any]]:
         table = self._table()
         if table is None:

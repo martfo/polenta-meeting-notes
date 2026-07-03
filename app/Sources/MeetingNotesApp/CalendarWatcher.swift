@@ -65,6 +65,8 @@ final class CalendarWatcher: ObservableObject {
     private var accessGranted = false
     private var dismissedKeys: Set<String> = []
     private var pollTask: Task<Void, Never>?
+    private var previousMicrophoneInUse: Bool?
+    private var previousCallApps: Set<String> = []
 
     func start() {
         pollTask?.cancel()
@@ -118,9 +120,17 @@ final class CalendarWatcher: ObservableObject {
             }
         }
         let names = NSWorkspace.shared.runningApplications.compactMap(\.localizedName)
-        if let app = MeetingDetection.runningCallApp(
+        let microphoneInUse = MicrophoneActivity.defaultInputInUse()
+        let callApps = Set(names.filter { MeetingDetection.callAppNames.contains($0) })
+        defer {
+            previousMicrophoneInUse = microphoneInUse
+            previousCallApps = callApps
+        }
+        if let app = MeetingDetection.callPromptTrigger(
             processNames: names,
-            microphoneInUse: MicrophoneActivity.defaultInputInUse()) {
+            microphoneInUse: microphoneInUse,
+            previousMicrophoneInUse: previousMicrophoneInUse,
+            previousCallApps: previousCallApps) {
             let key = "app:\(app)"
             if !dismissedKeys.contains(key) {
                 offer = Offer(
@@ -130,11 +140,17 @@ final class CalendarWatcher: ObservableObject {
                     attendees: [])
                 return
             }
-        } else {
-            // The call app quit; a future call can prompt again.
-            dismissedKeys = dismissedKeys.filter { !$0.hasPrefix("app:") }
         }
-        offer = nil
+        if !microphoneInUse {
+            // The call ended; the next one can prompt again.
+            dismissedKeys = dismissedKeys.filter { !$0.hasPrefix("app:") }
+            if offer?.key.hasPrefix("app:") == true {
+                offer = nil  // the banner does not outlive the call
+            }
+        }
+        if offer?.key.hasPrefix("calendar:") == true {
+            offer = nil
+        }
     }
 
     private func dueEvent() -> EKEvent? {

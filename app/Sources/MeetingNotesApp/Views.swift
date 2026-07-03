@@ -86,7 +86,6 @@ struct VaultPicker: View {
 struct MainSplit: View {
     @EnvironmentObject var model: AppModel
     @State private var showLibraryChat = false
-    @State private var showSettings = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -109,15 +108,11 @@ struct MainSplit: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Ask the library") { showLibraryChat = true }
-                Button("Settings") { showSettings = true }
                 RecordToolbarButton(capture: model.capture)
             }
         }
         .sheet(isPresented: $showLibraryChat) {
             LibraryChatSheet().environmentObject(model)
-        }
-        .sheet(isPresented: $showSettings) {
-            SettingsSheet().environmentObject(model)
         }
     }
 }
@@ -154,52 +149,53 @@ struct SettingsSheet: View {
     @AppStorage(Appearance.designKey) private var fontDesign = "system"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Settings").font(.title2).bold()
+        VStack(spacing: 0) {
+            Form {
+                Section("Appearance") {
+                    Picker("Font", selection: $fontDesign) {
+                        ForEach(Appearance.designs, id: \.raw) { design in
+                            Text(design.name).tag(design.raw)
+                        }
+                    }
+                    HStack {
+                        Text("Size")
+                        Slider(value: $baseFontSize, in: 11...18, step: 1)
+                        Text("\(Int(baseFontSize)) pt")
+                            .monospacedDigit()
+                            .frame(width: 44, alignment: .trailing)
+                    }
+                    Text("The quick brown fox jumps over the lazy dog.")
+                        .font(Appearance.font(size: baseFontSize, design: fontDesign))
+                        .foregroundStyle(.secondary)
+                }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Appearance").fontWeight(.medium)
-                Picker("Font", selection: $fontDesign) {
-                    ForEach(Appearance.designs, id: \.raw) { design in
-                        Text(design.name).tag(design.raw)
+                Section("Summaries") {
+                    LabeledContent {
+                        Button("Open") { model.editSummaryPrompt() }
+                    } label: {
+                        Label("Summary prompt", systemImage: "square.and.pencil")
+                        Text("Changes take effect on the next summary, no restart.")
                     }
                 }
-                .pickerStyle(.segmented)
-                HStack {
-                    Text("Size")
-                    Slider(value: $baseFontSize, in: 11...18, step: 1)
-                    Text("\(Int(baseFontSize)) pt")
-                        .monospacedDigit()
-                        .frame(width: 44, alignment: .trailing)
+
+                Section("Troubleshooting") {
+                    LabeledContent {
+                        Button("Show") { model.revealLogs() }
+                    } label: {
+                        Label("Logs", systemImage: "doc.text.magnifyingglass")
+                        Text("What happened and where, never meeting content.")
+                    }
                 }
-                Text("The quick brown fox jumps over the lazy dog.")
-                    .font(Appearance.font(size: baseFontSize, design: fontDesign))
-                    .foregroundStyle(.secondary)
             }
-
+            .formStyle(.grouped)
             Divider()
-
-            VStack(alignment: .leading, spacing: 4) {
-                Button("Edit summary prompt") { model.editSummaryPrompt() }
-                Text("Opens the prompt file. Changes take effect on the next "
-                     + "summary with no restart.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Button("Show logs") { model.revealLogs() }
-                Text("Opens the logs folder in Finder. Logs record what "
-                     + "happened and where, never meeting content.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
             HStack {
                 Spacer()
                 Button("Close") { dismiss() }.keyboardShortcut(.defaultAction)
             }
+            .padding(12)
         }
-        .padding(20)
-        .frame(width: 430)
+        .frame(width: 480, height: 430)
     }
 }
 
@@ -298,6 +294,7 @@ struct RecordingBar: View {
     @ObservedObject var capture: CaptureController
     @ObservedObject var calendar: CalendarWatcher
     @ObservedObject var microphones: MicrophoneListModel
+    @State private var showSettings = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -351,8 +348,18 @@ struct RecordingBar: View {
             if let message = model.lastRecordingMessage {
                 Text(message).font(.caption).foregroundStyle(.secondary)
             }
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.borderless)
+            .help("Settings")
         }
         .padding(10)
+        .sheet(isPresented: $showSettings) {
+            SettingsSheet().environmentObject(model)
+        }
     }
 }
 

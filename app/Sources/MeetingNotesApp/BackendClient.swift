@@ -45,6 +45,7 @@ struct MeetingDetail: Codable {
     let title: String
     let folder: String?
     let attendees: [MeetingAttendee]
+    let summary_edited: Int?
     let processing_status: String
     let summary_status: String
     let last_error: String?
@@ -153,6 +154,10 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         if let folder { body["folder"] = folder }
         let response: Response = try await post("/library/chat", body: body)
         return (response.answer, response.citations)
+    }
+
+    func deleteMeeting(_ id: String) async throws {
+        let _: [String: AnyDecodable] = try await request("DELETE", "/meetings/\(id)", body: nil)
     }
 
     func renameMeeting(_ id: String, title: String) async throws {

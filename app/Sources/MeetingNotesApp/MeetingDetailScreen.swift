@@ -32,6 +32,7 @@ struct MeetingDetailScreen: View {
     @State private var pasteMonitor: Any?
     @State private var showRegeneratePrompt = false
     @State private var keepEditsChosen = false
+    @State private var showDeleteConfirm = false
 
     private var contentFont: Font {
         Appearance.font(size: baseFontSize, design: fontDesign)
@@ -82,9 +83,22 @@ struct MeetingDetailScreen: View {
             }
             Button("Keep my edits", role: .cancel) { keepEditsChosen = true }
         } message: {
-            Text("The notes changed, and you have edited this summary by hand. "
-                 + "Regenerating replaces your edits with a fresh summary that "
-                 + "includes the new notes.")
+            Text("You have edited this summary by hand. Regenerating replaces "
+                 + "your edits with a fresh summary written from the transcript "
+                 + "and the current notes.")
+        }
+        .alert("Delete this meeting?", isPresented: $showDeleteConfirm) {
+            Button("Delete", role: .destructive) {
+                Task {
+                    try? await model.client.deleteMeeting(meetingID)
+                    model.selectedMeetingID = nil
+                    await model.refreshLibrary()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The recording, transcript, summary, and notes are removed "
+                 + "from the vault. Voices you have named stay remembered.")
         }
         .task(id: meetingID) {
             chatHistory = []
@@ -136,9 +150,30 @@ struct MeetingDetailScreen: View {
                         }
                     }
                 }
-                Button("Reveal in Finder") {
-                    model.revealInFinder(path: detail.reveal_path)
+                Menu {
+                    Button("Reveal in Finder") {
+                        model.revealInFinder(path: detail.reveal_path)
+                    }
+                    Button("Regenerate summary") {
+                        if detail.summary_edited == 1 {
+                            showRegeneratePrompt = true
+                        } else {
+                            Task {
+                                try? await model.client.regenerateSummary(meetingID)
+                                await reload(keepingDraft: true)
+                            }
+                        }
+                    }
+                    .disabled(detail.transcript == nil)
+                    Divider()
+                    Button("Delete meeting", role: .destructive) {
+                        showDeleteConfirm = true
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
+                .menuIndicator(.hidden)
+                .fixedSize()
             }
             if detail.processing_status == "failed" {
                 Text(detail.last_error ?? "Processing failed.")
