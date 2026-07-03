@@ -14,6 +14,19 @@ extension UserDefaults: KeyValueStore {
     }
 }
 
+public enum MicrophoneSelection {
+    /// Which device should be selected after the device list changes, for
+    /// example when AirPods connect mid-session. The remembered choice wins
+    /// when it is available (so headphones that reconnect are picked up
+    /// automatically), then whatever is currently selected, then the first
+    /// device.
+    public static func choose(available uids: [String], saved: String?, current: String?) -> String? {
+        if let saved, uids.contains(saved) { return saved }
+        if let current, uids.contains(current) { return current }
+        return uids.first
+    }
+}
+
 public struct MicrophonePreference {
     static let key = "selectedMicrophoneUID"
     private let store: KeyValueStore

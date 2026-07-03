@@ -186,8 +186,7 @@ struct StatusLabel: View {
 struct RecordingBar: View {
     @EnvironmentObject var model: AppModel
     @State private var title = ""
-    @State private var devices = InputDevice.all()
-    @State private var microphone: InputDevice?
+    @StateObject private var microphones = MicrophoneListModel()
 
     var body: some View {
         HStack(spacing: 14) {
@@ -203,7 +202,7 @@ struct RecordingBar: View {
                 LevelBar(label: "System audio", level: model.capture.systemLevel)
             } else {
                 Button {
-                    model.startRecording(microphone: microphone)
+                    model.startRecording(microphone: microphones.selection)
                 } label: {
                     Label("Start recording", systemImage: "record.circle")
                 }
@@ -211,18 +210,12 @@ struct RecordingBar: View {
                 TextField("Meeting title", text: $title)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 260)
-                Picker("Microphone", selection: $microphone) {
-                    ForEach(devices) { device in
+                Picker("Microphone", selection: $microphones.selection) {
+                    ForEach(microphones.devices) { device in
                         Text(device.name).tag(Optional(device))
                     }
                 }
                 .frame(maxWidth: 280)
-                .onAppear { restoreMicrophoneChoice() }
-                .onChange(of: microphone) { _, chosen in
-                    if let chosen {
-                        MicrophonePreference(store: UserDefaults.standard).save(deviceUID: chosen.uid)
-                    }
-                }
             }
             Spacer()
             if let message = model.lastRecordingMessage {
@@ -230,12 +223,6 @@ struct RecordingBar: View {
             }
         }
         .padding(10)
-    }
-
-    private func restoreMicrophoneChoice() {
-        devices = InputDevice.all()
-        let savedUID = MicrophonePreference(store: UserDefaults.standard).restore()
-        microphone = devices.first { $0.uid == savedUID } ?? devices.first
     }
 }
 

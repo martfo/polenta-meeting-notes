@@ -124,6 +124,23 @@ struct AC_1_1_CaptureTests {
         #expect(MicrophonePreference(store: MemoryStore()).restore() == nil)
     }
 
+    @Test("device-list changes re-select the remembered microphone (AC-1.1-e follow-on)")
+    func test_microphone_selection_after_device_change() {
+        let builtIn = "BuiltInMicrophoneDevice"
+        let airpods = "AirPods-UID"
+
+        // AirPods were the remembered choice; while absent, something else is
+        // selected.
+        #expect(MicrophoneSelection.choose(available: [builtIn], saved: airpods, current: nil) == builtIn)
+        // They connect mid-session: the remembered choice wins.
+        #expect(MicrophoneSelection.choose(available: [builtIn, airpods], saved: airpods, current: builtIn) == airpods)
+        // The current choice holds when it is also the remembered one.
+        #expect(MicrophoneSelection.choose(available: [builtIn, airpods], saved: builtIn, current: builtIn) == builtIn)
+        // The selected device vanished: fall back to the first available.
+        #expect(MicrophoneSelection.choose(available: [builtIn], saved: airpods, current: airpods) == builtIn)
+        #expect(MicrophoneSelection.choose(available: [], saved: airpods, current: airpods) == nil)
+    }
+
     @Test("AC-1.1-f silent system audio flags the meeting as in-person")
     func test_ac_1_1_f_in_person_classifier() {
         let silent = SourceClassifier()
