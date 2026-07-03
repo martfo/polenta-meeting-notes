@@ -46,8 +46,11 @@ final class RealRuntimeInstaller: RuntimeInstalling {
     }
 
     func installDependencies(at runtime: URL) throws {
+        // The pipeline extra carries WhisperX and pyannote and the embeddings
+        // extra carries bge-m3. Without them the installed app could accept
+        // recordings but never transcribe or search them.
         try runUV(["pip", "install", "--python", venvPython(runtime).path,
-                   bundledBackend.path],
+                   "\(bundledBackend.path)[pipeline,embeddings]"],
                   step: "installing the backend")
     }
 

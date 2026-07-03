@@ -86,7 +86,7 @@ struct MainSplit: View {
                 }
             }
             Divider()
-            RecordingBar()
+            RecordingBar(capture: model.capture)
         }
         .toolbar {
             Button("Edit summary prompt") { model.editSummaryPrompt() }
@@ -185,12 +185,15 @@ struct StatusLabel: View {
 
 struct RecordingBar: View {
     @EnvironmentObject var model: AppModel
+    // Observed directly: the level meters live on the capture controller, and
+    // a nested ObservableObject does not republish through AppModel.
+    @ObservedObject var capture: CaptureController
     @State private var title = ""
     @StateObject private var microphones = MicrophoneListModel()
 
     var body: some View {
         HStack(spacing: 14) {
-            if model.capture.isCapturing {
+            if capture.isCapturing {
                 Button {
                     model.stopRecording(title: title)
                     title = ""
@@ -198,8 +201,8 @@ struct RecordingBar: View {
                     Label("Stop", systemImage: "stop.circle.fill")
                 }
                 .tint(.red)
-                LevelBar(label: "Microphone", level: model.capture.microphoneLevel)
-                LevelBar(label: "System audio", level: model.capture.systemLevel)
+                LevelBar(label: "Microphone", level: capture.microphoneLevel)
+                LevelBar(label: "System audio", level: capture.systemLevel)
             } else {
                 Button {
                     model.startRecording(microphone: microphones.selection)

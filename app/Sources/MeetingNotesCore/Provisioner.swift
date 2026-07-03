@@ -26,7 +26,9 @@ public enum RuntimeLocation {
 
 /// The marker's content; bump to force re-provisioning after a breaking
 /// runtime change.
-public let runtimeVersion = "1"
+/// 2: the backend is installed with the pipeline and embeddings extras, so
+///    transcription and library search work in the installed app.
+public let runtimeVersion = "2"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

@@ -72,13 +72,25 @@ final class AppModel: ObservableObject {
 
     func startRecording(microphone: InputDevice?) {
         guard let coordinator else { return }
-        do {
-            coordinator.start()
-            try capture.start(microphoneDeviceID: microphone?.id)
-            lastRecordingMessage = nil
-        } catch {
-            _ = try? coordinator.stop(wavData: Data(), title: "aborted", source: .online)
-            lastRecordingMessage = error.localizedDescription
+        Task {
+            // Ask for the microphone up front, so the consent prompt appears
+            // the first time rather than the engine quietly running silent.
+            let granted = await CaptureController.requestMicrophoneAccess()
+            let readiness = CaptureReadiness.evaluate(
+                microphone: granted ? .granted : .denied,
+                systemAudio: .granted)  // no public query; the tap itself reports failure
+            if case .blocked(let message) = readiness {
+                lastRecordingMessage = message
+                return
+            }
+            do {
+                coordinator.start()
+                try capture.start(microphoneDeviceID: microphone?.id)
+                lastRecordingMessage = nil
+            } catch {
+                _ = try? coordinator.stop(wavData: Data(), title: "aborted", source: .online)
+                lastRecordingMessage = error.localizedDescription
+            }
         }
     }
 

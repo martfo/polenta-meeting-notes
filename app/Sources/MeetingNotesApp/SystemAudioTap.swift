@@ -12,6 +12,9 @@
 import CoreAudio
 import Foundation
 import MeetingNotesCore
+import os
+
+private let tapLog = Logger(subsystem: "co.uk.designturbine.meetingnotes", category: "system-audio-tap")
 
 enum CaptureError: LocalizedError {
     case coreAudio(String, OSStatus)
@@ -29,6 +32,7 @@ final class SystemAudioTap {
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var ioProcID: AudioDeviceIOProcID?
     private(set) var sampleRate: Double = 48_000
+    private var buffersReceived = 0
 
     /// Mono float samples at `sampleRate`, delivered from the IO thread.
     var onBuffer: (([Float]) -> Void)?
@@ -39,8 +43,11 @@ final class SystemAudioTap {
         var tap = AudioObjectID(kAudioObjectUnknown)
         try check(AudioHardwareCreateProcessTap(description, &tap), "creating the system audio tap")
         tapID = tap
+        tapLog.info("process tap created, id \(tap)")
 
         sampleRate = (try? tapFormat().mSampleRate) ?? 48_000
+        tapLog.info("tap format sample rate \(self.sampleRate)")
+        buffersReceived = 0
 
         let outputUID = try defaultOutputDeviceUID()
         let aggregateDescription: [String: Any] = [
@@ -74,9 +81,17 @@ final class SystemAudioTap {
             "attaching to the capture device")
         ioProcID = procID
         try check(AudioDeviceStart(aggregateID, ioProcID), "starting the capture device")
+        tapLog.info("capture device started, aggregate \(aggregate)")
     }
 
     func stop() {
+        if buffersReceived == 0 {
+            tapLog.warning(
+                "the system audio tap delivered no buffers for this recording; "
+                + "check Privacy and Security, Screen and System Audio Recording")
+        } else {
+            tapLog.info("tap delivered \(self.buffersReceived) buffers")
+        }
         if aggregateID != AudioObjectID(kAudioObjectUnknown) {
             if let ioProcID {
                 AudioDeviceStop(aggregateID, ioProcID)
@@ -98,6 +113,10 @@ final class SystemAudioTap {
         var list = bufferList
         let buffers = UnsafeMutableAudioBufferListPointer(&list)
         guard let onBuffer else { return }
+        buffersReceived += 1
+        if buffersReceived == 1 {
+            tapLog.info("first tap buffer arrived")
+        }
         for buffer in buffers {
             guard let data = buffer.mData else { continue }
             let channels = max(1, Int(buffer.mNumberChannels))
