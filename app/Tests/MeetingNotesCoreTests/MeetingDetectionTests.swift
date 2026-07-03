@@ -16,9 +16,18 @@ struct MeetingDetectionTests {
         #expect(!MeetingDetection.isDue(start: start, now: start.addingTimeInterval(3_000)), "long started")
     }
 
-    @Test("a call app in the process list is a trigger; anything else is not")
+    @Test("a call app only triggers while the microphone is actually held open")
     func test_call_app_detection() {
-        #expect(MeetingDetection.runningCallApp(processNames: ["Finder", "zoom.us", "Dock"]) == "zoom.us")
-        #expect(MeetingDetection.runningCallApp(processNames: ["Finder", "Safari"]) == nil)
+        // Slack sitting idle in the Dock is not a call.
+        #expect(MeetingDetection.runningCallApp(
+            processNames: ["Finder", "Slack", "Dock"], microphoneInUse: false) == nil)
+        // Slack plus a live microphone is.
+        #expect(MeetingDetection.runningCallApp(
+            processNames: ["Finder", "Slack", "Dock"], microphoneInUse: true) == "Slack")
+        #expect(MeetingDetection.runningCallApp(
+            processNames: ["Finder", "zoom.us"], microphoneInUse: true) == "zoom.us")
+        // A busy microphone without a call app (dictation, say) is not either.
+        #expect(MeetingDetection.runningCallApp(
+            processNames: ["Finder", "Safari"], microphoneInUse: true) == nil)
     }
 }

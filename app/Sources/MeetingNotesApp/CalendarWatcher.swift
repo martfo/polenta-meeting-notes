@@ -8,9 +8,39 @@
 // and no OAuth setup.
 
 import AppKit
+import CoreAudio
 import EventKit
 import Foundation
 import MeetingNotesCore
+
+/// Whether any process is capturing from the default input device right now.
+/// Every live call holds the microphone open, muted or not, so this is the
+/// difference between a call app running and a call actually happening.
+enum MicrophoneActivity {
+    static func defaultInputInUse() -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var deviceID = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID) == noErr,
+            deviceID != AudioObjectID(kAudioObjectUnknown)
+        else { return false }
+
+        var runningAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var running: UInt32 = 0
+        var runningSize = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(
+            deviceID, &runningAddress, 0, nil, &runningSize, &running) == noErr
+        else { return false }
+        return running != 0
+    }
+}
 
 @MainActor
 final class CalendarWatcher: ObservableObject {
@@ -88,7 +118,9 @@ final class CalendarWatcher: ObservableObject {
             }
         }
         let names = NSWorkspace.shared.runningApplications.compactMap(\.localizedName)
-        if let app = MeetingDetection.runningCallApp(processNames: names) {
+        if let app = MeetingDetection.runningCallApp(
+            processNames: names,
+            microphoneInUse: MicrophoneActivity.defaultInputInUse()) {
             let key = "app:\(app)"
             if !dismissedKeys.contains(key) {
                 offer = Offer(

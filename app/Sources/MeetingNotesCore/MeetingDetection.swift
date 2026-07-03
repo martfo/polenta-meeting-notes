@@ -14,12 +14,17 @@ public enum MeetingDetection {
         start.timeIntervalSince(now) <= lead && now.timeIntervalSince(start) <= grace
     }
 
-    /// Process names that mean a call is probably happening.
+    /// Apps that carry calls. Most of them run all day, so their presence
+    /// alone means nothing.
     public static let callAppNames: Set<String> = [
         "zoom.us", "Microsoft Teams", "Teams", "Slack", "FaceTime", "webexmta",
     ]
 
-    public static func runningCallApp(processNames: [String]) -> String? {
-        processNames.first { callAppNames.contains($0) }
+    /// In a call, not merely running: a call app counts only while something
+    /// is actually holding the microphone open, which every live call does,
+    /// muted or not.
+    public static func runningCallApp(processNames: [String], microphoneInUse: Bool) -> String? {
+        guard microphoneInUse else { return nil }
+        return processNames.first { callAppNames.contains($0) }
     }
 }
