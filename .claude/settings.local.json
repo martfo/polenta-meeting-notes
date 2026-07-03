@@ -25,7 +25,10 @@
       "Read(//Applications/**)",
       "Bash(find /Library/Developer/CommandLineTools -name \"XCTest*\" -maxdepth 6 2>/dev/null | head -5; find /Library/Developer/CommandLineTools -iname \"*testing*\" -maxdepth 7 2>/dev/null | head -10)",
       "Bash(python3 -)",
-      "Bash(make gate-app *)"
+      "Bash(make gate-app *)",
+      "Bash(swift build *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(make gate *)"
     ]
   }
 }

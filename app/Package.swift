@@ -12,6 +12,7 @@ let package = Package(
         .executableTarget(
             name: "MeetingNotesApp",
             dependencies: ["MeetingNotesCore"],
+            resources: [.copy("Resources")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
