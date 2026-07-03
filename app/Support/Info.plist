@@ -22,6 +22,8 @@
 	<string>MeetingNotes records the sound of your online calls so the other participants can be transcribed. Nothing leaves this Mac.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>MeetingNotes records your microphone so you and anyone in the room can be transcribed. Nothing leaves this Mac.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>MeetingNotes reads your calendar, on this Mac only, to offer to record when a meeting is due and to suggest attendee names for the voices it hears. It never changes anything in your calendar.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>

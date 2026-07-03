@@ -6,6 +6,7 @@ import SwiftUI
 
 struct SpeakersTab: View {
     let meetingID: String
+    let attendees: [String]
     let onChanged: () async -> Void
 
     @EnvironmentObject var model: AppModel
@@ -24,6 +25,16 @@ struct SpeakersTab: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                if !attendees.isEmpty && assignment.confirmed == 0 {
+                    // Second naming priority: the invite's attendee list.
+                    Menu("From the invite") {
+                        ForEach(attendees, id: \.self) { attendee in
+                            Button(attendee) { assign(assignment, attendee: attendee) }
+                        }
+                    }
+                    .frame(width: 140)
+                    .disabled(busy)
+                }
                 TextField("Name this voice", text: draftBinding(assignment))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 200)
@@ -86,6 +97,16 @@ struct SpeakersTab: View {
             defer { busy = false }
             try? await model.client.nameSpeaker(assignment.id, name: name)
             drafts[assignment.id] = ""
+            await refresh()
+            await onChanged()
+        }
+    }
+
+    private func assign(_ assignment: SpeakerAssignment, attendee: String) {
+        busy = true
+        Task {
+            defer { busy = false }
+            try? await model.client.assignAttendee(assignment.id, name: attendee)
             await refresh()
             await onChanged()
         }

@@ -35,10 +35,16 @@ struct SpeakerAssignment: Codable, Identifiable, Hashable {
     let match_score: Double?
 }
 
+struct MeetingAttendee: Codable, Hashable {
+    let name: String
+    let email: String?
+}
+
 struct MeetingDetail: Codable {
     let id: String
     let title: String
     let folder: String?
+    let attendees: [MeetingAttendee]
     let processing_status: String
     let summary_status: String
     let last_error: String?
@@ -102,6 +108,25 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         return suggestion.folder
     }
 
+    func setAttendees(_ id: String, attendees: [MeetingAttendee]) async throws {
+        struct Payload: Encodable { let attendees: [MeetingAttendee] }
+        let _: [String: AnyDecodable] = try await send(
+            "POST", "/meetings/\(id)/attendees", encodable: Payload(attendees: attendees))
+    }
+
+    func assignAttendee(_ assignmentID: Int, name: String) async throws {
+        let _: [String: AnyDecodable] = try await post(
+            "/speaker-assignments/\(assignmentID)/attendee", body: ["name": name])
+    }
+
+    func libraryChat(question: String, allFolders: Bool, folder: String?) async throws -> (answer: String, citations: [String]) {
+        struct Response: Codable { let answer: String; let citations: [String] }
+        var body = ["question": question, "scope": allFolders ? "all" : "folder"]
+        if let folder { body["folder"] = folder }
+        let response: Response = try await post("/library/chat", body: body)
+        return (response.answer, response.citations)
+    }
+
     func renameMeeting(_ id: String, title: String) async throws {
         let _: [String: AnyDecodable] = try await put("/meetings/\(id)/title", body: ["name": title])
     }
@@ -156,6 +181,18 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
 
     private func request<T: Decodable>(_ method: String, _ path: String, body: [String: String]?) async throws -> T {
         let (data, response) = try await session.data(for: try makeRequest(method, path, body: body))
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw BackendError(message: "The backend answered with an error for \(path).")
+        }
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    private func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, encodable: B) async throws -> T {
+        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        request.httpMethod = method
+        request.httpBody = try JSONEncoder().encode(encodable)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw BackendError(message: "The backend answered with an error for \(path).")
         }

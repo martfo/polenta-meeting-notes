@@ -91,3 +91,30 @@ def test_meeting_rename_and_speaker_naming_refresh(conn, vault, stages, fixtures
         (meeting_id,),
     ).fetchone()[0]
     assert queued == 1, "one regeneration, deduped across the two namings"
+
+
+def test_attendee_prefill_endpoint(conn, vault, stages):
+    """Attendees from a calendar invite land on the meeting, marked as from
+    the calendar, deduplicated, and visible in the detail the app reads."""
+    import httpx
+
+    from tests.conftest import make_meeting
+
+    def lm_ready(request):
+        return httpx.Response(200, json={"data": [{"id": "qwen", "state": "loaded"}]})
+
+    meeting_id = make_meeting(conn, vault)
+    payload = {"attendees": [
+        {"name": "Ben Adams", "email": "ben@example.com"},
+        {"name": "Roger Neel", "email": None},
+    ]}
+
+    with TestClient(make_app(conn, vault, stages, lm_ready)) as client:
+        assert client.post(f"/meetings/{meeting_id}/attendees", json=payload).json() == {"added": 2}
+        # The same invite offered again adds nothing.
+        assert client.post(f"/meetings/{meeting_id}/attendees", json=payload).json() == {"added": 0}
+
+        detail = client.get(f"/meetings/{meeting_id}").json()
+        assert [(a["name"], a["from_calendar"]) for a in detail["attendees"]] == [
+            ("Ben Adams", 1), ("Roger Neel", 1),
+        ]

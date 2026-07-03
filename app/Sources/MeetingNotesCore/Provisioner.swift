@@ -36,7 +36,8 @@ public enum RuntimeLocation {
 /// 5: meetings can be renamed, and naming a speaker regenerates the summary
 ///    from the resolved transcript.
 /// 6: the meeting detail carries its folder name for the filing menu.
-public let runtimeVersion = "6"
+/// 7: attendee pre-fill from calendar invites.
+public let runtimeVersion = "7"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

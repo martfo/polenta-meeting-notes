@@ -159,7 +159,7 @@ struct MeetingDetailScreen: View {
             }
             .padding()
         case "Speakers":
-            SpeakersTab(meetingID: meetingID) {
+            SpeakersTab(meetingID: meetingID, attendees: detail.attendees.map(\.name)) {
                 await reload(keepingDraft: true)
             }
         default:

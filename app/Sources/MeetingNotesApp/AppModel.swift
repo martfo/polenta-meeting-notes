@@ -16,8 +16,13 @@ final class AppModel: ObservableObject {
 
     let client = BackendClient()
     let capture = CaptureController()
+    let calendar = CalendarWatcher()
     private(set) var supervisor: BackendSupervisor?
     private(set) var coordinator: RecordingCoordinator?
+
+    /// Attendees carried from an accepted calendar offer into the meeting
+    /// that capture creates on Stop.
+    var pendingAttendees: [MeetingAttendee] = []
 
     var vaultURL: URL? {
         vaultPath.isEmpty ? nil : URL(fileURLWithPath: vaultPath)
@@ -69,6 +74,9 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+        calendar.isRecording = { [weak self] in self?.capture.isCapturing ?? false }
+        calendar.start()
+
         // Processing happens in the background, so the library keeps itself
         // fresh rather than showing stale statuses until the next click.
         libraryPoll?.cancel()
@@ -121,11 +129,19 @@ final class AppModel: ObservableObject {
                 title: title.isEmpty ? "Meeting" : title,
                 source: source)
             switch outcome {
-            case .enqueued:
+            case .enqueued(let meetingID):
                 lastRecordingMessage = "Saved and queued for processing. You can start the next meeting now."
+                if !pendingAttendees.isEmpty {
+                    let attendees = pendingAttendees
+                    Task {
+                        try? await client.setAttendees(meetingID, attendees: attendees)
+                        await refreshLibrary()
+                    }
+                }
             case .pendingBackend:
                 lastRecordingMessage = "Saved. The backend is not running yet, so processing will start when it is."
             }
+            pendingAttendees = []
         } catch {
             lastRecordingMessage = "The recording could not be saved: \(error.localizedDescription)"
         }

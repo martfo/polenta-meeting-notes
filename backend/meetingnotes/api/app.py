@@ -68,6 +68,16 @@ class LibraryChatRequest(BaseModel):
     folder: str | None = None
 
 
+class AttendeeIn(BaseModel):
+    name: str
+    email: str | None = None
+
+
+class AttendeesRequest(BaseModel):
+    attendees: list[AttendeeIn]
+    from_calendar: bool = True
+
+
 class ImageRequest(BaseModel):
     data_base64: str
     suffix: str = "png"
@@ -215,6 +225,21 @@ def create_app(state: AppState) -> FastAPI:
         asg.assign_from_attendee(state.gallery, assignment_id, request.name)
         _refresh_for(assignment_id)
         return {"assigned": True}
+
+    @app.post("/meetings/{meeting_id}/attendees")
+    def add_attendees(meeting_id: str, request: AttendeesRequest) -> dict:
+        """Attendee pre-fill from the calendar invite. The names feed speaker
+        assignment as the second naming priority after voice enrolment."""
+        m.get_meeting(conn, meeting_id)
+        existing = {(a["name"], a["email"]) for a in m.list_attendees(conn, meeting_id)}
+        added = 0
+        for attendee in request.attendees:
+            if (attendee.name, attendee.email) in existing:
+                continue
+            m.add_attendee(conn, meeting_id, attendee.name, attendee.email,
+                           from_calendar=request.from_calendar)
+            added += 1
+        return {"added": added}
 
     @app.put("/meetings/{meeting_id}/title")
     def rename_meeting(meeting_id: str, request: FolderRequest) -> dict:

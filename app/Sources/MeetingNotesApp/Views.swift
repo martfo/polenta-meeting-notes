@@ -80,6 +80,7 @@ struct VaultPicker: View {
 
 struct MainSplit: View {
     @EnvironmentObject var model: AppModel
+    @State private var showLibraryChat = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -96,11 +97,15 @@ struct MainSplit: View {
                 }
             }
             Divider()
-            RecordingBar(capture: model.capture)
+            RecordingBar(capture: model.capture, calendar: model.calendar)
         }
         .toolbar {
+            Button("Ask the library") { showLibraryChat = true }
             Button("Edit summary prompt") { model.editSummaryPrompt() }
             Button("Reveal logs in Finder") { model.revealLogs() }
+        }
+        .sheet(isPresented: $showLibraryChat) {
+            LibraryChatSheet().environmentObject(model)
         }
     }
 }
@@ -198,10 +203,44 @@ struct RecordingBar: View {
     // Observed directly: the level meters live on the capture controller, and
     // a nested ObservableObject does not republish through AppModel.
     @ObservedObject var capture: CaptureController
+    @ObservedObject var calendar: CalendarWatcher
     @State private var title = ""
     @StateObject private var microphones = MicrophoneListModel()
 
     var body: some View {
+        VStack(spacing: 0) {
+            if let offer = calendar.offer, !capture.isCapturing {
+                HStack(spacing: 10) {
+                    Image(systemName: "calendar.badge.clock")
+                    Text(offer.reason)
+                    if !offer.attendees.isEmpty {
+                        Text(offer.attendees.map(\.name).joined(separator: ", "))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button("Start recording") { accept(offer) }
+                        .buttonStyle(.borderedProminent)
+                    Button("Not now") { calendar.dismiss() }
+                }
+                .font(.callout)
+                .padding(8)
+                .background(.blue.opacity(0.12))
+            }
+            recordingControls
+        }
+    }
+
+    private func accept(_ offer: CalendarWatcher.Offer) {
+        title = offer.title
+        model.pendingAttendees = offer.attendees.map {
+            MeetingAttendee(name: $0.name, email: $0.email)
+        }
+        calendar.accepted()
+        model.startRecording(microphone: microphones.selection)
+    }
+
+    private var recordingControls: some View {
         HStack(spacing: 14) {
             if capture.isCapturing {
                 Button {
