@@ -1,10 +1,12 @@
-"""Test inventory for the acceptance criteria in this file.
+"""Section 1.4: the notes pane feeds the summary. Unit tier."""
 
-Stubs are filled in as their slice is built and must stay green after.
-"""
-import pytest
+from meetingnotes.llm.summary import assemble_messages
 
 
-@pytest.mark.skip(reason="stub: slice 1.4 not yet built")
 def test_ac_1_4_b_notes_in_summary_context():
-    ...
+    """Typed note text is included in the assembled summary context."""
+    notes = "Supplier quote still outstanding. Chase Priya on Monday."
+    messages = assemble_messages("template", "transcript text", notes)
+    content = messages[-1]["content"]
+    assert notes in content
+    assert "# My notes" in content

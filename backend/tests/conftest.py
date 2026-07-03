@@ -76,6 +76,19 @@ def gallery(conn, vault):
     return Gallery(conn, vault)
 
 
+class FakeLMClient:
+    """Duck-typed LMStudioClient: canned replies in order (the last one
+    repeats), every request recorded."""
+
+    def __init__(self, *replies: str):
+        self.replies = list(replies)
+        self.requests: list[list[dict[str, str]]] = []
+
+    def chat(self, messages, temperature=0.2):
+        self.requests.append(messages)
+        return self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+
+
 def make_meeting(conn, vault, meeting_id="2026-07-02_1400_client-review", title="Client review"):
     """A bare meeting row plus its folder on disk, for tests that need one."""
     from meetingnotes.storage import meetings as m
