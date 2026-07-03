@@ -27,6 +27,12 @@ struct MeetingDetailScreen: View {
     @State private var chatQuestion = ""
     @State private var chatBusy = false
     @State private var chatDrawerOpen = false
+    @AppStorage(Appearance.sizeKey) private var baseFontSize = Appearance.defaultSize
+    @AppStorage(Appearance.designKey) private var fontDesign = "system"
+
+    private var contentFont: Font {
+        Appearance.font(size: baseFontSize, design: fontDesign)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -38,20 +44,28 @@ struct MeetingDetailScreen: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
                 content(detail)
-                Divider()
-                chatInputBar
+                if !chatDrawerOpen {
+                    Divider()
+                    chatInputBar
+                }
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .overlay(alignment: .bottom) {
+        .overlay {
             if chatDrawerOpen {
-                ChatDrawer(
-                    history: chatHistory,
-                    question: $chatQuestion,
-                    busy: chatBusy,
-                    onAsk: ask,
-                    onClose: { chatDrawerOpen = false })
+                GeometryReader { geometry in
+                    VStack(spacing: 0) {
+                        Spacer()
+                        ChatDrawer(
+                            history: chatHistory,
+                            question: $chatQuestion,
+                            busy: chatBusy,
+                            onAsk: ask,
+                            onClose: { chatDrawerOpen = false })
+                        .frame(height: geometry.size.height / 2)
+                    }
+                }
                 .transition(.move(edge: .bottom))
             }
         }
@@ -133,7 +147,7 @@ struct MeetingDetailScreen: View {
         case "Notes":
             VStack(alignment: .leading) {
                 TextEditor(text: $notesDraft)
-                    .font(.body)
+                    .font(contentFont)
                     .focused($notesFocused)
                     .onPasteCommand(of: [UTType.image]) { _ in
                         pasteImageFromPasteboard()
@@ -166,7 +180,7 @@ struct MeetingDetailScreen: View {
         } else {
             VStack(alignment: .leading) {
                 TextEditor(text: $summaryDraft)
-                    .font(.body)
+                    .font(contentFont)
                     .focused($summaryFocused)
                     .onChange(of: summaryFocused) { _, focused in
                         if !focused { saveSummary() }
@@ -343,12 +357,9 @@ struct ChatDrawer: View {
             }
             .padding(10)
         }
-        .frame(maxHeight: 320)
         .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 10, topTrailingRadius: 10))
         .shadow(radius: 8)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
     }
 }
 

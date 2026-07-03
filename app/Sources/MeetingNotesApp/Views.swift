@@ -24,6 +24,8 @@ struct MeetingNotesApp: App {
 struct RootView: View {
     @EnvironmentObject var model: AppModel
     @State private var needsFirstRun = RootView.firstRunNeeded()
+    @AppStorage(Appearance.sizeKey) private var baseFontSize = Appearance.defaultSize
+    @AppStorage(Appearance.designKey) private var fontDesign = "system"
 
     /// First run is decided by the provisioning marker and its version, not
     /// by whether some runtime happens to exist: an outdated runtime must be
@@ -36,16 +38,19 @@ struct RootView: View {
     }
 
     var body: some View {
-        if model.vaultURL == nil {
-            VaultPicker()
-        } else if needsFirstRun {
-            FirstRunView {
-                needsFirstRun = false
-                model.bootBackend()
+        Group {
+            if model.vaultURL == nil {
+                VaultPicker()
+            } else if needsFirstRun {
+                FirstRunView {
+                    needsFirstRun = false
+                    model.bootBackend()
+                }
+            } else {
+                MainSplit()
             }
-        } else {
-            MainSplit()
         }
+        .font(Appearance.font(size: baseFontSize, design: fontDesign))
     }
 }
 
@@ -145,10 +150,34 @@ struct RecordToolbarButton: View {
 struct SettingsSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(Appearance.sizeKey) private var baseFontSize = Appearance.defaultSize
+    @AppStorage(Appearance.designKey) private var fontDesign = "system"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Settings").font(.title2).bold()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Appearance").fontWeight(.medium)
+                Picker("Font", selection: $fontDesign) {
+                    ForEach(Appearance.designs, id: \.raw) { design in
+                        Text(design.name).tag(design.raw)
+                    }
+                }
+                .pickerStyle(.segmented)
+                HStack {
+                    Text("Size")
+                    Slider(value: $baseFontSize, in: 11...18, step: 1)
+                    Text("\(Int(baseFontSize)) pt")
+                        .monospacedDigit()
+                        .frame(width: 44, alignment: .trailing)
+                }
+                Text("The quick brown fox jumps over the lazy dog.")
+                    .font(Appearance.font(size: baseFontSize, design: fontDesign))
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
 
             VStack(alignment: .leading, spacing: 4) {
                 Button("Edit summary prompt") { model.editSummaryPrompt() }
