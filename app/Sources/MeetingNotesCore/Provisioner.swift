@@ -32,7 +32,8 @@ public enum RuntimeLocation {
 ///    transcription and library search work in the installed app.
 /// 3: backend fixes: the bge-m3 repo id resolves, and the backend exits with
 ///    its parent app instead of lingering as an orphan.
-public let runtimeVersion = "3"
+/// 4: naming a speaker refreshes transcript.md and meeting.md.
+public let runtimeVersion = "4"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

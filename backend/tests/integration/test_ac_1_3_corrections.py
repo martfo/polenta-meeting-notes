@@ -20,6 +20,32 @@ def second_meeting(conn, vault):
     return make_meeting(conn, vault, "2026-07-02_1000_second", "Second meeting")
 
 
+def test_naming_refreshes_transcript_and_front_matter(gallery, vectors, meeting, conn, vault, fixtures_dir):
+    """Naming a speaker after processing rewrites transcript.md and the
+    meeting.md speakers list with the resolved name."""
+    import shutil
+
+    from meetingnotes.storage.frontmatter import read_meeting_md, write_meeting_md
+    from meetingnotes.storage.refresh import refresh_meeting_files
+
+    shutil.copyfile(
+        fixtures_dir / "segments" / "two_speaker_meeting.json",
+        vault.meeting_dir(meeting) / "segments.json",
+    )
+    write_meeting_md(vault.meeting_md_path(meeting), {"id": meeting}, "## Core items discussed\n\nBody.")
+    row_id = asg.record_cluster(gallery, meeting, "SPEAKER_00", [vectors["ben_positive_1"]])
+
+    asg.correct(gallery, row_id, "Martin")
+    refresh_meeting_files(conn, vault, meeting)
+
+    transcript = vault.transcript_path(meeting).read_text()
+    assert "**[00:00:00] Martin**" in transcript
+    assert "SPEAKER_00" not in transcript
+    front, body = read_meeting_md(vault.meeting_md_path(meeting))
+    assert "Martin" in front["speakers"]
+    assert body.startswith("## Core items discussed"), "the summary body is untouched"
+
+
 def test_ac_1_3_d_confirm_writes_positive(gallery, vectors, meeting):
     """Confirming a name writes the cluster voiceprint as a positive example
     under that name."""

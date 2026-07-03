@@ -20,7 +20,7 @@ struct MeetingDetailScreen: View {
             if let detail {
                 header(detail)
                 Picker("", selection: $tab) {
-                    ForEach(["Summary", "Transcript", "Notes", "Chat"], id: \.self) { Text($0) }
+                    ForEach(["Summary", "Transcript", "Notes", "Chat", "Speakers"], id: \.self) { Text($0) }
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
@@ -120,6 +120,10 @@ struct MeetingDetailScreen: View {
                 }
             }
             .padding()
+        case "Speakers":
+            SpeakersTab(meetingID: meetingID) {
+                await reload(keepingDraft: true)
+            }
         default:
             MarkdownPane(text: summaryBody(detail))
         }

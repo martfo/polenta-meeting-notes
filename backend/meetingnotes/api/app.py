@@ -169,19 +169,28 @@ def create_app(state: AppState) -> FastAPI:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def _refresh_for(assignment_id: int) -> None:
+        from meetingnotes.storage.refresh import refresh_meeting_files
+
+        row = asg.get_assignment(conn, assignment_id)
+        refresh_meeting_files(conn, vault, row["meeting_id"])
+
     @app.post("/speaker-assignments/{assignment_id}/confirm")
     def confirm_assignment(assignment_id: int) -> dict:
         asg.confirm(state.gallery, assignment_id)
+        _refresh_for(assignment_id)
         return {"confirmed": True}
 
     @app.post("/speaker-assignments/{assignment_id}/correct")
     def correct_assignment(assignment_id: int, request: CorrectionRequest) -> dict:
         asg.correct(state.gallery, assignment_id, request.name)
+        _refresh_for(assignment_id)
         return {"corrected": True}
 
     @app.post("/speaker-assignments/{assignment_id}/attendee")
     def assign_attendee(assignment_id: int, request: FolderRequest) -> dict:
         asg.assign_from_attendee(state.gallery, assignment_id, request.name)
+        _refresh_for(assignment_id)
         return {"assigned": True}
 
     @app.put("/meetings/{meeting_id}/notes")

@@ -26,6 +26,15 @@ struct LibraryGroup: Codable, Identifiable, Hashable {
     let meetings: [MeetingSummaryRow]
 }
 
+struct SpeakerAssignment: Codable, Identifiable, Hashable {
+    let id: Int
+    let diarised_label: String
+    let display_name: String?
+    let assigned_by: String?
+    let confirmed: Int
+    let match_score: Double?
+}
+
 struct MeetingDetail: Codable {
     let id: String
     let title: String
@@ -90,6 +99,20 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         struct Suggestion: Codable { let folder: String?; let is_new: Bool }
         let suggestion: Suggestion = try await post("/meetings/\(id)/suggest-folder", body: nil)
         return suggestion.folder
+    }
+
+    func meetingSpeakers(_ id: String) async throws -> [SpeakerAssignment] {
+        try await get("/meetings/\(id)/speakers")
+    }
+
+    func confirmSpeaker(_ assignmentID: Int) async throws {
+        let _: [String: AnyDecodable] = try await post(
+            "/speaker-assignments/\(assignmentID)/confirm", body: nil)
+    }
+
+    func nameSpeaker(_ assignmentID: Int, name: String) async throws {
+        let _: [String: AnyDecodable] = try await post(
+            "/speaker-assignments/\(assignmentID)/correct", body: ["name": name])
     }
 
     // MARK: - BackendEnqueuing (synchronous: called from the recording path)
