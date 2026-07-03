@@ -45,3 +45,49 @@ def test_ac_x_c_bootstrap_healthcheck(conn, vault, stages):
         body = client.get("/health").json()
         assert body["status"] == "ok", "the backend itself is healthy"
         assert body["lmstudio"] == "unreachable", "a clear message, not a crash"
+
+
+def test_meeting_rename_and_speaker_naming_refresh(conn, vault, stages, fixtures_dir):
+    """Renaming a meeting updates the row and front matter; naming a speaker
+    on a summarised meeting queues one summary regeneration, however many
+    names change."""
+    import shutil
+
+    import httpx
+
+    from meetingnotes.enrolment import assignments as asg
+    from meetingnotes.enrolment.gallery import Gallery
+    from meetingnotes.storage import meetings as m
+    from meetingnotes.storage.frontmatter import read_meeting_md, write_meeting_md
+    from tests.conftest import make_meeting
+
+    def lm_ready(request):
+        return httpx.Response(200, json={"data": [{"id": "qwen", "state": "loaded"}]})
+
+    meeting_id = make_meeting(conn, vault)
+    shutil.copyfile(
+        fixtures_dir / "segments" / "two_speaker_meeting.json",
+        vault.meeting_dir(meeting_id) / "segments.json",
+    )
+    write_meeting_md(vault.meeting_md_path(meeting_id), {"id": meeting_id}, "Summary body.")
+    gallery = Gallery(conn, vault)
+    first = asg.record_cluster(gallery, meeting_id, "SPEAKER_00", [[1.0] + [0.0] * 7])
+    second = asg.record_cluster(gallery, meeting_id, "SPEAKER_01", [[0.0, 1.0] + [0.0] * 6])
+
+    with TestClient(make_app(conn, vault, stages, lm_ready)) as client:
+        response = client.put(f"/meetings/{meeting_id}/title", json={"name": "Talking to myself"})
+        assert response.status_code == 200
+        assert m.get_meeting(conn, meeting_id)["title"] == "Talking to myself"
+        front, _ = read_meeting_md(vault.meeting_md_path(meeting_id))
+        assert front["title"] == "Talking to myself"
+
+        client.post(f"/speaker-assignments/{first}/correct", json={"name": "Martin"})
+        client.post(f"/speaker-assignments/{second}/correct", json={"name": "Echo"})
+
+    assert "Martin" in vault.transcript_path(meeting_id).read_text()
+    queued = conn.execute(
+        "SELECT COUNT(*) FROM processing_jobs WHERE meeting_id = ? "
+        "AND stage = 'summarise' AND status = 'queued'",
+        (meeting_id,),
+    ).fetchone()[0]
+    assert queued == 1, "one regeneration, deduped across the two namings"

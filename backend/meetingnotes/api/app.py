@@ -169,11 +169,27 @@ def create_app(state: AppState) -> FastAPI:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def _resummarise(meeting_id: str) -> None:
+        """A finished summary was written from the old names, so naming a
+        speaker regenerates it from the resolved transcript. Deduped: one
+        queued summarise job is enough however many names change."""
+        if not vault.meeting_md_path(meeting_id).exists():
+            return  # the pipeline has not summarised yet; it will use the new names
+        queued = conn.execute(
+            "SELECT COUNT(*) FROM processing_jobs WHERE meeting_id = ? "
+            "AND stage = 'summarise' AND status = 'queued'",
+            (meeting_id,),
+        ).fetchone()[0]
+        if queued == 0:
+            q.enqueue(conn, meeting_id, stage="summarise")
+        state.worker.notify()
+
     def _refresh_for(assignment_id: int) -> None:
         from meetingnotes.storage.refresh import refresh_meeting_files
 
         row = asg.get_assignment(conn, assignment_id)
         refresh_meeting_files(conn, vault, row["meeting_id"])
+        _resummarise(row["meeting_id"])
 
     @app.post("/speaker-assignments/{assignment_id}/confirm")
     def confirm_assignment(assignment_id: int) -> dict:
@@ -192,6 +208,19 @@ def create_app(state: AppState) -> FastAPI:
         asg.assign_from_attendee(state.gallery, assignment_id, request.name)
         _refresh_for(assignment_id)
         return {"assigned": True}
+
+    @app.put("/meetings/{meeting_id}/title")
+    def rename_meeting(meeting_id: str, request: FolderRequest) -> dict:
+        title = request.name.strip()
+        if not title:
+            raise HTTPException(422, "a meeting needs a title")
+        m.get_meeting(conn, meeting_id)  # 404 via KeyError if absent
+        conn.execute("UPDATE meetings SET title = ? WHERE id = ?", (title, meeting_id))
+        conn.commit()
+        from meetingnotes.storage.refresh import refresh_meeting_files
+
+        refresh_meeting_files(conn, vault, meeting_id)
+        return {"title": title}
 
     @app.put("/meetings/{meeting_id}/notes")
     def save_notes(meeting_id: str, request: NotesRequest) -> dict:

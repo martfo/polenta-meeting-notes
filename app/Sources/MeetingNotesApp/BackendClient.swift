@@ -101,6 +101,10 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         return suggestion.folder
     }
 
+    func renameMeeting(_ id: String, title: String) async throws {
+        let _: [String: AnyDecodable] = try await put("/meetings/\(id)/title", body: ["name": title])
+    }
+
     func meetingSpeakers(_ id: String) async throws -> [SpeakerAssignment] {
         try await get("/meetings/\(id)/speakers")
     }

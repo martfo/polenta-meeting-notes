@@ -11,6 +11,7 @@ struct MeetingDetailScreen: View {
     @State private var detail: MeetingDetail?
     @State private var tab = "Summary"
     @State private var notesDraft = ""
+    @State private var titleDraft: String?
     @State private var chatHistory: [(question: String, answer: String)] = []
     @State private var chatQuestion = ""
     @State private var chatBusy = false
@@ -40,6 +41,17 @@ struct MeetingDetailScreen: View {
         }
     }
 
+    private func saveTitle() {
+        let title = (titleDraft ?? "").trimmingCharacters(in: .whitespaces)
+        titleDraft = nil
+        guard !title.isEmpty, title != detail?.title else { return }
+        Task {
+            try? await model.client.renameMeeting(meetingID, title: title)
+            await reload(keepingDraft: true)
+            await model.refreshLibrary()
+        }
+    }
+
     private func reload(keepingDraft: Bool = false) async {
         guard let fresh = try? await model.client.meeting(meetingID) else { return }
         detail = fresh
@@ -54,7 +66,21 @@ struct MeetingDetailScreen: View {
         // own line underneath rather than pushing them around.
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(detail.title).font(.title2).bold()
+                if titleDraft != nil {
+                    TextField("Meeting title", text: Binding(
+                        get: { titleDraft ?? "" },
+                        set: { titleDraft = $0 }))
+                        .textFieldStyle(.roundedBorder)
+                        .font(.title2)
+                        .frame(maxWidth: 420)
+                        .onSubmit { saveTitle() }
+                        .onExitCommand { titleDraft = nil }
+                } else {
+                    Text(detail.title)
+                        .font(.title2).bold()
+                        .onTapGesture { titleDraft = detail.title }
+                        .help("Click to rename this meeting")
+                }
                 Spacer()
                 if detail.processing_status == "failed" {
                     Button("Retry from \(detail.failed_stage ?? "the failed stage")") {
