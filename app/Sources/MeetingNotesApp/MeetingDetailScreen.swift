@@ -201,12 +201,28 @@ struct MeetingDetailScreen: View {
                 TextEditor(text: $notesDraft)
                     .font(contentFont)
                     .focused($notesFocused)
-                    .onPasteCommand(of: [UTType.image]) { _ in
-                        pasteImageFromPasteboard()
-                    }
                     .onChange(of: notesFocused) { _, focused in
                         if !focused { saveNotes() }
                     }
+                let images = pastedImageURLs(in: notesDraft, revealPath: detail.reveal_path)
+                if !images.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(images, id: \.self) { url in
+                                if let image = NSImage(contentsOf: url) {
+                                    Image(nsImage: image)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(height: 90)
+                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                                        .overlay(RoundedRectangle(cornerRadius: 6)
+                                            .stroke(.secondary.opacity(0.3)))
+                                }
+                            }
+                        }
+                    }
+                    .frame(height: 96)
+                }
                 HStack {
                     Text("Notes save on their own and feed into the summary; they are "
                          + "never rewritten. Paste screenshots straight in; they are "
@@ -324,7 +340,12 @@ struct MeetingDetailScreen: View {
         let text = summaryDraft
         guard detail?.summary != nil, text != lastSavedSummary, !text.isEmpty else { return }
         lastSavedSummary = text
-        Task { try? await model.client.saveSummary(meetingID, body: text) }
+        Task {
+            try? await model.client.saveSummary(meetingID, body: text)
+            // Refresh so the menu's Regenerate sees the summary is now edited
+            // and asks before replacing it.
+            await reload(keepingDraft: true)
+        }
     }
 
     private func reload(keepingDraft: Bool = false) async {
@@ -355,6 +376,20 @@ struct MeetingDetailScreen: View {
             return String(summary[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return summary
+    }
+
+    /// The image files linked from the notes body, resolved against the
+    /// meeting folder on disk so the thumbnails render locally.
+    private func pastedImageURLs(in notes: String, revealPath: String) -> [URL] {
+        let base = URL(fileURLWithPath: revealPath)
+        let pattern = #"!\[[^\]]*\]\((assets/[^)]+)\)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(notes.startIndex..., in: notes)
+        return regex.matches(in: notes, range: range).compactMap { match in
+            guard let r = Range(match.range(at: 1), in: notes) else { return nil }
+            let url = base.appendingPathComponent(String(notes[r]))
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
     }
 
     static func pasteboardHasImage() -> Bool {
@@ -397,15 +432,15 @@ struct MeetingDetailScreen: View {
             // Typed text first, so the backend appends the image link after it.
             lastSavedNotes = notesDraft
             _ = try? await model.client.saveNotes(meetingID, text: notesDraft)
-            let result = try? await model.client.pasteImage(meetingID, data: png)
+            _ = try? await model.client.pasteImage(meetingID, data: png)
             if let fresh = try? await model.client.meeting(meetingID) {
                 detail = fresh
                 notesDraft = fresh.notes
                 lastSavedNotes = fresh.notes
             }
-            if let result {
-                handleSummaryAction(result.summaryAction)
-            }
+            // No regenerate prompt mid-paste: the image is added at once, and
+            // an edited summary is left for the menu's Regenerate to offer.
+            // A machine summary was already re-queued by the backend.
         }
     }
 }

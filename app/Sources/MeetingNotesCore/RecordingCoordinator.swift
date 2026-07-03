@@ -81,6 +81,13 @@ public final class RecordingCoordinator {
         isRecording = true
     }
 
+    /// Abandon a recording that never captured anything, for example when the
+    /// audio tap failed to start. No meeting is created and nothing is
+    /// written, so a failed start leaves no empty-audio meeting behind.
+    public func cancel() {
+        isRecording = false
+    }
+
     /// Write the mixed WAV to the vault's captures folder and hand it to the
     /// backend. Returns at once either way; recording can start again
     /// immediately.

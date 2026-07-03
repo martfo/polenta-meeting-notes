@@ -51,6 +51,42 @@ def test_ac_1_0_g_stage_status_updates_and_failure_moves_on(conn, vault, stages,
     assert statuses_seen == ["enriching"]
 
 
+def test_import_rejects_empty_audio(conn, vault, tmp_path):
+    """An empty capture file is never imported, so a failed recording start
+    leaves no 0-byte meeting behind."""
+    import pytest
+
+    empty = tmp_path / "capture-empty.wav"
+    empty.write_bytes(b"")
+    with pytest.raises(ValueError):
+        import_wav(conn, vault, empty)
+    assert conn.execute("SELECT COUNT(*) FROM meetings").fetchone()[0] == 0
+
+
+def test_purge_empty_recordings(conn, vault, fixtures_dir):
+    """The startup sweep removes meetings that captured nothing and keeps
+    real ones."""
+    from meetingnotes.storage import meetings as m
+    from meetingnotes.storage.cleanup import purge_empty_recordings
+
+    good = import_wav(conn, vault, fixtures_dir / "audio" / "two_speaker_meeting.wav", title="Real")
+
+    # A junk meeting as an old app version would have left it: a row, a
+    # folder, a 0-byte audio file, no transcript.
+    junk = "2026-07-04_0900_aborted"
+    vault.meeting_dir(junk).mkdir(parents=True)
+    vault.audio_path(junk).write_bytes(b"")
+    m.create_meeting(conn, junk, title="aborted", started_at="2026-07-04T09:00:00+00:00",
+                     vault_path=str(vault.meeting_dir(junk)), processing_status="failed")
+
+    removed = purge_empty_recordings(conn, vault)
+
+    assert removed == [junk]
+    assert not vault.meeting_dir(junk).exists()
+    assert m.get_meeting(conn, good)["id"] == good, "the real meeting is untouched"
+    assert vault.audio_path(good).exists()
+
+
 def test_ac_1_0_h_import_wav_enqueues_same_job(conn, vault, fixtures_dir):
     """Importing a WAV produces the same downstream job as capture: a queued
     transcribe job for a meeting whose audio sits in the vault."""

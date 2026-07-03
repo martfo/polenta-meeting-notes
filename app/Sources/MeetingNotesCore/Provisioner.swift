@@ -44,7 +44,9 @@ public enum RuntimeLocation {
 /// 11: notes changes regenerate machine summaries and ask before touching
 ///     edited ones.
 /// 12: meetings can be deleted, and call detection triggers on changes only.
-public let runtimeVersion = "12"
+/// 13: empty recordings are rejected and old empty-recording meetings are
+///     purged at startup.
+public let runtimeVersion = "13"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

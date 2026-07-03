@@ -115,12 +115,14 @@ final class AppModel: ObservableObject {
                 return
             }
             do {
-                coordinator.start()
+                // Capture must come up before the coordinator is marked
+                // recording, so a tap failure leaves no meeting behind.
                 try capture.start(microphoneDeviceID: microphone?.id)
+                coordinator.start()
                 lastRecordingMessage = nil
             } catch {
-                _ = try? coordinator.stop(wavData: Data(), title: "aborted", source: .online)
-                lastRecordingMessage = error.localizedDescription
+                coordinator.cancel()
+                lastRecordingMessage = "Recording could not start: \(error.localizedDescription)"
             }
         }
     }

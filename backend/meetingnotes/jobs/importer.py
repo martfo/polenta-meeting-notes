@@ -35,6 +35,8 @@ def import_wav(
     Returns the meeting id without waiting for any processing.
     """
     wav_path = Path(wav_path)
+    if not wav_path.exists() or wav_path.stat().st_size == 0:
+        raise ValueError("cannot import an empty or missing audio file")
     title = title or wav_path.stem.replace("_", " ").replace("-", " ").strip() or "Imported meeting"
     started_at = started_at or datetime.now().astimezone()
 

@@ -63,6 +63,15 @@ def main(config_path: str) -> None:
     configure_logging(vault.logs_dir, config.log_level)
     conn = open_db(vault.db_path)
 
+    from meetingnotes.storage.cleanup import purge_empty_recordings
+
+    purged = purge_empty_recordings(conn, vault)
+    if purged:
+        import logging
+
+        logging.getLogger("meetingnotes").info(
+            "removed %d empty-recording meetings at startup", len(purged))
+
     lm_client = LMStudioClient(config.lmstudio_base_url)
     gallery = Gallery(conn, vault)
 
