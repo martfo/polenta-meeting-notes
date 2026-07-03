@@ -53,15 +53,15 @@ class Worker:
         start = q.STAGES.index(job.stage)
         for stage in q.STAGES[start:]:
             m.set_processing_status(conn, job.meeting_id, STAGE_STATUS[stage])
-            log.info("meeting %s stage %s started", job.meeting_id, stage)
+            log.info("stage started", extra={"meeting_id": job.meeting_id, "stage": stage})
             try:
                 self.stages[stage](job.meeting_id)
             except LMStudioUnavailable:
                 # Partial completion: everything before the summary is done and
                 # usable. The summary stays pending until LM Studio returns.
                 log.warning(
-                    "meeting %s stage %s: LM Studio unreachable, summary left pending",
-                    job.meeting_id, stage,
+                    "LM Studio unreachable, summary left pending",
+                    extra={"meeting_id": job.meeting_id, "stage": stage},
                 )
                 m.set_summary_status(conn, job.meeting_id, "pending")
                 m.set_processing_status(conn, job.meeting_id, "ready")
@@ -69,7 +69,7 @@ class Worker:
                 return
             except Exception as exc:
                 message = f"{stage} failed: {exc}"
-                log.error("meeting %s stage %s failed", job.meeting_id, stage)
+                log.error("stage failed", extra={"meeting_id": job.meeting_id, "stage": stage})
                 m.record_failure(conn, job.meeting_id, stage, message)
                 q.mark_failed(conn, job.id, message)
                 return
@@ -79,7 +79,7 @@ class Worker:
             "needs_attention" if summary == "needs_attention" else "ready",
         )
         q.mark_done(conn, job.id)
-        log.info("meeting %s processed", job.meeting_id)
+        log.info("processed", extra={"meeting_id": job.meeting_id})
 
     def run_pending(self) -> int:
         """Process queued jobs until the queue is empty. Returns the count."""

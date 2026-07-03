@@ -1,0 +1,83 @@
+"""The backend service: python -m meetingnotes <path-to-config.json>.
+
+Launched and supervised by the Swift app, never by hand. The heavy models are
+constructed lazily on first use so the service comes up fast and health
+checks answer at once."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+class _Lazy:
+    """Defers construction to the first attribute access."""
+
+    def __init__(self, factory):
+        self._factory = factory
+        self._obj = None
+
+    def __getattr__(self, name):
+        if self._obj is None:
+            self._obj = self._factory()
+        return getattr(self._obj, name)
+
+
+def main(config_path: str) -> None:
+    import uvicorn
+
+    from meetingnotes.api.app import AppState, create_app
+    from meetingnotes.config import load_config
+    from meetingnotes.enrolment.gallery import Gallery
+    from meetingnotes.jobs.stages import build_stages
+    from meetingnotes.jobs.worker import Worker
+    from meetingnotes.llm.client import LMStudioClient
+    from meetingnotes.logging.setup import configure_logging
+    from meetingnotes.notes.ocr import VisionOcr
+    from meetingnotes.storage.db import open_db
+    from meetingnotes.storage.keychain import read_hf_token
+    from meetingnotes.storage.vault import Vault
+
+    config = load_config(Path(config_path))
+    vault = Vault(config.vault_path).ensure()
+    configure_logging(vault.logs_dir, config.log_level)
+    conn = open_db(vault.db_path)
+
+    lm_client = LMStudioClient(config.lmstudio_base_url)
+    gallery = Gallery(conn, vault)
+
+    def make_engine():
+        from meetingnotes.pipeline.whisperx_engine import WhisperXEngine
+
+        return WhisperXEngine(hf_token=read_hf_token())
+
+    def make_embedder():
+        from meetingnotes.enrolment.embedder import PyannoteSpeakerEmbedder
+
+        return PyannoteSpeakerEmbedder(hf_token=read_hf_token())
+
+    stages = build_stages(
+        conn, vault, config,
+        engine=_Lazy(make_engine),
+        speaker_embedder=_Lazy(make_embedder),
+        lm_client=lm_client,
+        ocr_engine=VisionOcr(),
+    )
+    worker = Worker(conn, stages)
+    worker.start()
+
+    app = create_app(AppState(
+        conn=conn, vault=vault, config=config, worker=worker,
+        lm_client=lm_client, gallery=gallery,
+    ))
+    try:
+        uvicorn.run(app, host="127.0.0.1", port=config.backend_port, log_config=None)
+    finally:
+        worker.stop()
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("usage: python -m meetingnotes <path-to-config.json>", file=sys.stderr)
+        sys.exit(2)
+    main(sys.argv[1])

@@ -97,7 +97,9 @@ def utcnow() -> str:
 
 
 def open_db(path: Path | str) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(path))
+    # The API thread and the worker thread share this connection; WAL plus
+    # SQLite's own serialisation make that safe for our short writes.
+    conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")

@@ -53,9 +53,15 @@ class Vault:
         return self.settings_dir / "summary_prompt.md"
 
     def ensure(self) -> "Vault":
+        """Create the folder tree, and seed the editable summary prompt from
+        the bundled default when it is missing. Existing files are never
+        overwritten."""
         for d in (self.root, self.lancedb_dir, self.speakers_dir, self.logs_dir,
                   self.settings_dir, self.meetings_dir):
             d.mkdir(parents=True, exist_ok=True)
+        if not self.summary_prompt_path.exists():
+            default = Path(__file__).resolve().parents[1] / "resources" / "summary_prompt.md"
+            self.summary_prompt_path.write_text(default.read_text())
         return self
 
     def meeting_dir(self, meeting_id: str) -> Path:
