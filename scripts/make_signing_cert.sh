@@ -10,8 +10,13 @@ set -euo pipefail
 
 NAME="${1:-MeetingNotes Local Signing}"
 
-if security find-identity -v -p codesigning | grep -q "$NAME"; then
-  echo "The identity '$NAME' already exists. Nothing to do."
+# find-certificate rather than find-identity -v: the latter only lists
+# trusted identities, so it would miss a cert imported but not yet trusted
+# and this script would import a duplicate.
+if security find-certificate -c "$NAME" >/dev/null 2>&1; then
+  echo "The certificate '$NAME' already exists in the keychain."
+  echo "If codesigning still fails, set its Trust to Always Trust for Code"
+  echo "Signing in Keychain Access."
   exit 0
 fi
 
@@ -33,11 +38,14 @@ EOF
 
 openssl req -x509 -newkey rsa:2048 -days 3650 -nodes \
   -keyout "$WORK/key.pem" -out "$WORK/cert.pem" -config "$WORK/cert.conf"
-openssl pkcs12 -export -inkey "$WORK/key.pem" -in "$WORK/cert.pem" \
-  -name "$NAME" -out "$WORK/cert.p12" -passout pass:meetingnotes
 
-security import "$WORK/cert.p12" -k "$HOME/Library/Keychains/login.keychain-db" \
-  -P meetingnotes -T /usr/bin/codesign
+# The key and certificate are imported as PEM, separately, on purpose. A
+# PKCS12 bundle from OpenSSL 3 uses AES and SHA-256 defaults that the macOS
+# Security framework cannot verify (security import fails with "MAC
+# verification failed"), and the PEM path has no such format dependency.
+KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+security import "$WORK/key.pem" -k "$KEYCHAIN" -T /usr/bin/codesign
+security import "$WORK/cert.pem" -k "$KEYCHAIN" -T /usr/bin/codesign
 
 echo
 echo "Imported '$NAME' into the login keychain."
