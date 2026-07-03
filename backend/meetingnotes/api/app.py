@@ -187,18 +187,20 @@ def create_app(state: AppState) -> FastAPI:
         return [dict(r) for r in rows]
 
     def _resummarise(meeting_id: str) -> None:
-        """A finished summary was written from the old names, so naming a
-        speaker regenerates it from the resolved transcript. Deduped: one
-        queued summarise job is enough however many names change."""
+        """A processed meeting was indexed and summarised with the old names,
+        so naming a speaker re-runs from the embed stage: the search chunks
+        are re-embedded with the resolved names and the summary regenerates
+        from the resolved transcript. Deduped: one queued job is enough
+        however many names change."""
         if not vault.meeting_md_path(meeting_id).exists():
-            return  # the pipeline has not summarised yet; it will use the new names
+            return  # the pipeline has not got there yet; it will use the new names
         queued = conn.execute(
             "SELECT COUNT(*) FROM processing_jobs WHERE meeting_id = ? "
-            "AND stage = 'summarise' AND status = 'queued'",
+            "AND stage = 'embed' AND status = 'queued'",
             (meeting_id,),
         ).fetchone()[0]
         if queued == 0:
-            q.enqueue(conn, meeting_id, stage="summarise")
+            q.enqueue(conn, meeting_id, stage="embed")
         state.worker.notify()
 
     def _refresh_for(assignment_id: int) -> None:

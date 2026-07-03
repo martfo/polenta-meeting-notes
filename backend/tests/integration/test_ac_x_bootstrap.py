@@ -85,12 +85,15 @@ def test_meeting_rename_and_speaker_naming_refresh(conn, vault, stages, fixtures
         client.post(f"/speaker-assignments/{second}/correct", json={"name": "Echo"})
 
     assert "Martin" in vault.transcript_path(meeting_id).read_text()
+    # One queued job from the embed stage: the search index is re-embedded
+    # with the resolved names and the summary regenerates after it.
     queued = conn.execute(
-        "SELECT COUNT(*) FROM processing_jobs WHERE meeting_id = ? "
-        "AND stage = 'summarise' AND status = 'queued'",
+        "SELECT stage, COUNT(*) FROM processing_jobs WHERE meeting_id = ? "
+        "AND status = 'queued' GROUP BY stage",
         (meeting_id,),
-    ).fetchone()[0]
-    assert queued == 1, "one regeneration, deduped across the two namings"
+    ).fetchall()
+    assert [(row[0], row[1]) for row in queued] == [("embed", 1)], \
+        "one embed-and-summarise regeneration, deduped across the two namings"
 
 
 def test_attendee_prefill_endpoint(conn, vault, stages):
