@@ -86,9 +86,7 @@ final class SystemAudioTap {
 
     func stop() {
         if buffersReceived == 0 {
-            tapLog.warning(
-                "the system audio tap delivered no buffers for this recording; "
-                + "check Privacy and Security, Screen and System Audio Recording")
+            tapLog.warning("the system audio tap delivered no buffers for this recording; check Privacy and Security, Screen and System Audio Recording")
         } else {
             tapLog.info("tap delivered \(self.buffersReceived) buffers")
         }
