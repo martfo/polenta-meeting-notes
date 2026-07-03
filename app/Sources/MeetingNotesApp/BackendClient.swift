@@ -84,10 +84,20 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         let _: [String: AnyDecodable] = try await post("/meetings/\(id)/retry", body: nil)
     }
 
-    func chat(_ id: String, question: String) async throws -> String {
+    func chat(_ id: String, question: String,
+              history: [(question: String, answer: String)] = []) async throws -> String {
+        struct Turn: Encodable { let question: String; let answer: String }
+        struct Payload: Encodable { let question: String; let history: [Turn] }
         struct Answer: Codable { let answer: String }
-        let answer: Answer = try await post("/meetings/\(id)/chat", body: ["question": question])
+        let payload = Payload(
+            question: question,
+            history: history.map { Turn(question: $0.question, answer: $0.answer) })
+        let answer: Answer = try await send("POST", "/meetings/\(id)/chat", encodable: payload)
         return answer.answer
+    }
+
+    func saveSummary(_ id: String, body: String) async throws {
+        let _: [String: AnyDecodable] = try await put("/meetings/\(id)/summary", body: ["body": body])
     }
 
     func saveNotes(_ id: String, text: String) async throws {

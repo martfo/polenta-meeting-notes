@@ -48,9 +48,9 @@ def test_ac_x_c_bootstrap_healthcheck(conn, vault, stages):
 
 
 def test_meeting_rename_and_speaker_naming_refresh(conn, vault, stages, fixtures_dir):
-    """Renaming a meeting updates the row and front matter; naming a speaker
-    on a summarised meeting queues one summary regeneration, however many
-    names change."""
+    """Renaming a meeting updates the row and front matter. Naming a speaker
+    patches the name into the summary body in place, keeping the user's
+    edits, and never queues a regeneration."""
     import shutil
 
     import httpx
@@ -69,7 +69,10 @@ def test_meeting_rename_and_speaker_naming_refresh(conn, vault, stages, fixtures
         fixtures_dir / "segments" / "two_speaker_meeting.json",
         vault.meeting_dir(meeting_id) / "segments.json",
     )
-    write_meeting_md(vault.meeting_md_path(meeting_id), {"id": meeting_id}, "Summary body.")
+    write_meeting_md(
+        vault.meeting_md_path(meeting_id), {"id": meeting_id},
+        "## Core items discussed\n\nSPEAKER_00 explained the budget. MY OWN EDIT.\n",
+    )
     gallery = Gallery(conn, vault)
     first = asg.record_cluster(gallery, meeting_id, "SPEAKER_00", [[1.0] + [0.0] * 7])
     second = asg.record_cluster(gallery, meeting_id, "SPEAKER_01", [[0.0, 1.0] + [0.0] * 6])
@@ -84,16 +87,22 @@ def test_meeting_rename_and_speaker_naming_refresh(conn, vault, stages, fixtures
         client.post(f"/speaker-assignments/{first}/correct", json={"name": "Martin"})
         client.post(f"/speaker-assignments/{second}/correct", json={"name": "Echo"})
 
+        # Editing the summary body persists it under fresh front matter.
+        client.put(f"/meetings/{meeting_id}/summary",
+                   json={"body": read_meeting_md(vault.meeting_md_path(meeting_id))[1] + "\nAPPENDED."})
+
     assert "Martin" in vault.transcript_path(meeting_id).read_text()
-    # One queued job from the embed stage: the search index is re-embedded
-    # with the resolved names and the summary regenerates after it.
+    front, body = read_meeting_md(vault.meeting_md_path(meeting_id))
+    assert "Martin explained the budget." in body, "the name is patched in place"
+    assert "SPEAKER_00" not in body
+    assert "MY OWN EDIT." in body and "APPENDED." in body, "edits survive naming"
+    assert "Martin" in front["speakers"] and "Echo" in front["speakers"]
+    # Never a regeneration behind the user's back.
     queued = conn.execute(
-        "SELECT stage, COUNT(*) FROM processing_jobs WHERE meeting_id = ? "
-        "AND status = 'queued' GROUP BY stage",
+        "SELECT COUNT(*) FROM processing_jobs WHERE meeting_id = ? AND status = 'queued'",
         (meeting_id,),
-    ).fetchall()
-    assert [(row[0], row[1]) for row in queued] == [("embed", 1)], \
-        "one embed-and-summarise regeneration, deduped across the two namings"
+    ).fetchone()[0]
+    assert queued == 0
 
 
 def test_attendee_prefill_endpoint(conn, vault, stages):

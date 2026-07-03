@@ -46,8 +46,18 @@ class ImportRequest(BaseModel):
     expected_speakers: int | None = None
 
 
+class ChatTurn(BaseModel):
+    question: str
+    answer: str
+
+
 class ChatRequest(BaseModel):
     question: str
+    history: list[ChatTurn] = []
+
+
+class SummaryRequest(BaseModel):
+    body: str
 
 
 class FolderRequest(BaseModel):
@@ -151,6 +161,7 @@ def create_app(state: AppState) -> FastAPI:
         answer = ask_meeting(
             state.lm_client, request.question,
             transcript_path.read_text(), read_notes(vault, meeting_id),
+            history=[{"question": t.question, "answer": t.answer} for t in request.history],
         )
         return {"answer": answer}
 
@@ -186,47 +197,77 @@ def create_app(state: AppState) -> FastAPI:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def _resummarise(meeting_id: str) -> None:
-        """A processed meeting was indexed and summarised with the old names,
-        so naming a speaker re-runs from the embed stage: the search chunks
-        are re-embedded with the resolved names and the summary regenerates
-        from the resolved transcript. Deduped: one queued job is enough
-        however many names change."""
-        if not vault.meeting_md_path(meeting_id).exists():
-            return  # the pipeline has not got there yet; it will use the new names
-        queued = conn.execute(
-            "SELECT COUNT(*) FROM processing_jobs WHERE meeting_id = ? "
-            "AND stage = 'embed' AND status = 'queued'",
-            (meeting_id,),
-        ).fetchone()[0]
-        if queued == 0:
-            q.enqueue(conn, meeting_id, stage="embed")
-        state.worker.notify()
+    def _reindex(meeting_id: str) -> None:
+        """Re-embed the meeting's search chunks with the resolved names, off
+        the request thread. Derived data only; nothing the user wrote."""
+        if state.vector_store is None or state.text_embedder is None:
+            return
+        import threading
 
-    def _refresh_for(assignment_id: int) -> None:
-        from meetingnotes.storage.refresh import refresh_meeting_files
+        from meetingnotes.vectors.indexer import index_meeting
+
+        def run() -> None:
+            try:
+                index_meeting(conn, vault, state.vector_store, state.text_embedder, meeting_id)
+            except Exception:
+                import logging
+
+                logging.getLogger("meetingnotes").warning(
+                    "re-indexing after a name change failed",
+                    extra={"meeting_id": meeting_id, "stage": "embed"},
+                )
+
+        threading.Thread(target=run, name="reindex", daemon=True).start()
+
+    def _refresh_for(assignment_id: int, old_name: str | None) -> None:
+        """After a naming change: patch the name into the summary in place
+        (never regenerate; the summary may carry the user's edits), re-render
+        the transcript, and re-embed the search index."""
+        from meetingnotes.storage.refresh import refresh_meeting_files, rename_speaker_in_summary
 
         row = asg.get_assignment(conn, assignment_id)
+        rename_speaker_in_summary(vault, row["meeting_id"], old_name, row["display_name"])
         refresh_meeting_files(conn, vault, row["meeting_id"])
-        _resummarise(row["meeting_id"])
+        _reindex(row["meeting_id"])
+
+    def _display_name(assignment_id: int) -> str | None:
+        return asg.get_assignment(conn, assignment_id)["display_name"]
 
     @app.post("/speaker-assignments/{assignment_id}/confirm")
     def confirm_assignment(assignment_id: int) -> dict:
+        old_name = _display_name(assignment_id)
         asg.confirm(state.gallery, assignment_id)
-        _refresh_for(assignment_id)
+        _refresh_for(assignment_id, old_name)
         return {"confirmed": True}
 
     @app.post("/speaker-assignments/{assignment_id}/correct")
     def correct_assignment(assignment_id: int, request: CorrectionRequest) -> dict:
+        old_name = _display_name(assignment_id)
         asg.correct(state.gallery, assignment_id, request.name)
-        _refresh_for(assignment_id)
+        _refresh_for(assignment_id, old_name)
         return {"corrected": True}
 
     @app.post("/speaker-assignments/{assignment_id}/attendee")
     def assign_attendee(assignment_id: int, request: FolderRequest) -> dict:
+        old_name = _display_name(assignment_id)
         asg.assign_from_attendee(state.gallery, assignment_id, request.name)
-        _refresh_for(assignment_id)
+        _refresh_for(assignment_id, old_name)
         return {"assigned": True}
+
+    @app.put("/meetings/{meeting_id}/summary")
+    def edit_summary(meeting_id: str, request: SummaryRequest) -> dict:
+        """The user's edited summary body, written under fresh front matter.
+        Only an explicit Retry regenerates a summary over this."""
+        from meetingnotes.llm.summary import meeting_front_matter
+        from meetingnotes.storage.frontmatter import write_meeting_md
+
+        m.get_meeting(conn, meeting_id)
+        write_meeting_md(
+            vault.meeting_md_path(meeting_id),
+            meeting_front_matter(conn, meeting_id),
+            request.body,
+        )
+        return {"saved": True}
 
     @app.post("/meetings/{meeting_id}/attendees")
     def add_attendees(meeting_id: str, request: AttendeesRequest) -> dict:
