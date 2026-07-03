@@ -292,9 +292,12 @@ unified logging and mirrors errors to the same file.
 
 ## Toolchain notes
 
-WhisperX loads audio by shelling out to ffmpeg, so ffmpeg is a per-Mac prerequisite
-(brew install ffmpeg), documented in the README; bundling a static ffmpeg into the app
-is a later option. Our own pyannote embedding path deliberately avoids file decoding by
+WhisperX loads audio by shelling out to ffmpeg, so ffmpeg is currently a per-Mac
+prerequisite (brew install ffmpeg), documented in the README, and the supervisor adds
+the Homebrew paths to the backend's PATH. Committed before sign-off: the shipped app
+must not need this manual install. Either a static arm64 ffmpeg is bundled and signed
+inside the app, or the dependency is removed by feeding WhisperX preloaded audio
+arrays (vault audio is already 16 kHz mono PCM) with afconvert normalising imports. Our own pyannote embedding path deliberately avoids file decoding by
 passing preloaded waveforms, so it has no torchcodec or FFmpeg library dependency.
 pyannote.audio 4 and current whisperx take token=, not use_auth_token=; the older name
 is silently ignored and downloads then fail on the gated repos.
