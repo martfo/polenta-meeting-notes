@@ -123,8 +123,23 @@ def test_ac_2_1_e_citations_match_chunks(conn, vault, store, embedder, fixtures_
     result = ask_library(client, store, embedder, "what happened with the sensors",
                          scope=ChatScope.FOLDER, folder_id=clients)
 
+    # No Sources line in this canned reply: every retrieved meeting is cited.
     assert set(result.citations) == {a, b}
     # The chunks themselves were sent, labelled by meeting.
     sent = client.requests[0][-1]["content"]
     assert f"[meeting {a}]" in sent and f"[meeting {b}]" in sent
     assert "—" not in result.answer and "organised" in result.answer
+
+    # A reply that names its sources narrows the citations to the meetings
+    # the answer actually drew on, and the trailer is not shown.
+    naming = FakeLMClient(f"Ben said the sensors arrived on Tuesday.\n\nSources: {a}")
+    result = ask_library(naming, store, embedder, "when did the sensors arrive",
+                         scope=ChatScope.FOLDER, folder_id=clients)
+    assert result.citations == [a], "only the meeting the answer used"
+    assert "Sources:" not in result.answer
+
+    # A hallucinated source is ignored in favour of the honest fallback.
+    lying = FakeLMClient("Something.\n\nSources: 2026-01-01_0000_never-happened")
+    result = ask_library(lying, store, embedder, "what about the sensors",
+                         scope=ChatScope.FOLDER, folder_id=clients)
+    assert set(result.citations) == {a, b}

@@ -7,6 +7,7 @@ folder is the common case and searching the whole vault is rare."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -25,9 +26,33 @@ DEFAULT_SCOPE = ChatScope.FOLDER
 SYSTEM_PROMPT = (
     "You answer questions across a library of meeting transcripts, using only "
     "the excerpts provided. Each excerpt names its meeting and speaker. Answer "
-    "plainly in British English and say which meetings the answer comes from. "
-    "If the excerpts do not contain the answer, say so."
+    "plainly in British English. If the excerpts do not contain the answer, "
+    "say so. End your reply with a single line in exactly this form, naming "
+    "only the meetings your answer actually drew on:\n"
+    "Sources: <meeting id>, <meeting id>"
 )
+
+_SOURCES_LINE = re.compile(r"^\s*Sources:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def extract_citations(answer: str, retrieved_ids: list[str]) -> tuple[str, list[str]]:
+    """The meetings the answer drew on: the model's Sources line, validated
+    against what was actually retrieved so nothing can be invented; the ids
+    mentioned in the text as the next best; every retrieved meeting as the
+    honest fallback. The Sources line is stripped from the shown answer."""
+    match = None
+    for match in _SOURCES_LINE.finditer(answer):
+        pass  # keep the last occurrence
+    if match:
+        listed = {part.strip() for part in match.group(1).split(",")}
+        valid = [mid for mid in retrieved_ids if mid in listed]
+        if valid:
+            cleaned = (answer[:match.start()] + answer[match.end():]).strip()
+            return cleaned, valid
+    mentioned = [mid for mid in retrieved_ids if mid in answer]
+    if mentioned:
+        return answer, mentioned
+    return answer, retrieved_ids
 
 
 @dataclass
@@ -70,5 +95,6 @@ def ask_library(
     if not chunks:
         return LibraryAnswer(answer="Nothing in this scope matches the question.", citations=[])
     answer = client.chat(assemble_library_messages(question, chunks))
-    citations = list(dict.fromkeys(c["meeting_id"] for c in chunks))
-    return LibraryAnswer(answer=british_pass(answer, allowlist).text, citations=citations)
+    retrieved_ids = list(dict.fromkeys(c["meeting_id"] for c in chunks))
+    answer, citations = extract_citations(british_pass(answer, allowlist).text, retrieved_ids)
+    return LibraryAnswer(answer=answer, citations=citations)

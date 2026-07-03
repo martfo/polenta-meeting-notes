@@ -40,7 +40,8 @@ public enum RuntimeLocation {
 /// 8: naming a speaker re-embeds the search index, not just the summary, so
 ///    library chat knows the resolved names.
 /// 9: editable summaries with in-place name patching, and multi-turn chat.
-public let runtimeVersion = "9"
+/// 10: library chat cites only the meetings the answer drew on.
+public let runtimeVersion = "10"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.
