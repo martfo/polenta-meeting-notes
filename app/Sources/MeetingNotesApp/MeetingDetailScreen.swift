@@ -50,13 +50,13 @@ struct MeetingDetailScreen: View {
 
     @ViewBuilder
     private func header(_ detail: MeetingDetail) -> some View {
-        HStack {
-            Text(detail.title).font(.title2).bold()
-            Spacer()
-            if detail.processing_status == "failed" {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(detail.last_error ?? "Processing failed.")
-                        .font(.caption).foregroundStyle(.red)
+        // The buttons keep a fixed position; the error message sits on its
+        // own line underneath rather than pushing them around.
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(detail.title).font(.title2).bold()
+                Spacer()
+                if detail.processing_status == "failed" {
                     Button("Retry from \(detail.failed_stage ?? "the failed stage")") {
                         Task {
                             try? await model.client.retry(meetingID)
@@ -65,9 +65,15 @@ struct MeetingDetailScreen: View {
                         }
                     }
                 }
+                Button("Reveal in Finder") {
+                    model.revealInFinder(path: detail.reveal_path)
+                }
             }
-            Button("Reveal in Finder") {
-                model.revealInFinder(path: detail.reveal_path)
+            if detail.processing_status == "failed" {
+                Text(detail.last_error ?? "Processing failed.")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
         .padding()
