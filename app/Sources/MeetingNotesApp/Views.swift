@@ -81,6 +81,7 @@ struct VaultPicker: View {
 struct MainSplit: View {
     @EnvironmentObject var model: AppModel
     @State private var showLibraryChat = false
+    @State private var showSettings = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -97,16 +98,79 @@ struct MainSplit: View {
                 }
             }
             Divider()
-            RecordingBar(capture: model.capture, calendar: model.calendar)
+            RecordingBar(capture: model.capture, calendar: model.calendar,
+                         microphones: model.microphones)
         }
         .toolbar {
-            Button("Ask the library") { showLibraryChat = true }
-            Button("Edit summary prompt") { model.editSummaryPrompt() }
-            Button("Reveal logs in Finder") { model.revealLogs() }
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button("Ask the library") { showLibraryChat = true }
+                Button("Settings") { showSettings = true }
+                RecordToolbarButton(capture: model.capture)
+            }
         }
         .sheet(isPresented: $showLibraryChat) {
             LibraryChatSheet().environmentObject(model)
         }
+        .sheet(isPresented: $showSettings) {
+            SettingsSheet().environmentObject(model)
+        }
+    }
+}
+
+struct RecordToolbarButton: View {
+    @EnvironmentObject var model: AppModel
+    @ObservedObject var capture: CaptureController
+
+    var body: some View {
+        if capture.isCapturing {
+            Button {
+                model.stopRecording()
+            } label: {
+                Label("Stop recording", systemImage: "stop.circle.fill")
+                    .labelStyle(.titleAndIcon)
+            }
+            .tint(.red)
+        } else {
+            Button {
+                model.startRecording(microphone: model.microphones.selection)
+            } label: {
+                Label("Start recording", systemImage: "record.circle")
+                    .labelStyle(.titleAndIcon)
+            }
+            .keyboardShortcut("r")
+        }
+    }
+}
+
+struct SettingsSheet: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Settings").font(.title2).bold()
+
+            VStack(alignment: .leading, spacing: 4) {
+                Button("Edit summary prompt") { model.editSummaryPrompt() }
+                Text("Opens the prompt file. Changes take effect on the next "
+                     + "summary with no restart.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Button("Show logs") { model.revealLogs() }
+                Text("Opens the logs folder in Finder. Logs record what "
+                     + "happened and where, never meeting content.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Spacer()
+                Button("Close") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 430)
     }
 }
 
@@ -204,8 +268,7 @@ struct RecordingBar: View {
     // a nested ObservableObject does not republish through AppModel.
     @ObservedObject var capture: CaptureController
     @ObservedObject var calendar: CalendarWatcher
-    @State private var title = ""
-    @StateObject private var microphones = MicrophoneListModel()
+    @ObservedObject var microphones: MicrophoneListModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -232,7 +295,7 @@ struct RecordingBar: View {
     }
 
     private func accept(_ offer: CalendarWatcher.Offer) {
-        title = offer.title
+        model.pendingTitle = offer.title
         model.pendingAttendees = offer.attendees.map {
             MeetingAttendee(name: $0.name, email: $0.email)
         }
@@ -243,31 +306,17 @@ struct RecordingBar: View {
     private var recordingControls: some View {
         HStack(spacing: 14) {
             if capture.isCapturing {
-                Button {
-                    model.stopRecording(title: title)
-                    title = ""
-                } label: {
-                    Label("Stop", systemImage: "stop.circle.fill")
-                }
-                .tint(.red)
+                Label("Recording", systemImage: "record.circle.fill")
+                    .foregroundStyle(.red)
                 LevelBar(label: "Microphone", level: capture.microphoneLevel)
                 LevelBar(label: "System audio", level: capture.systemLevel)
             } else {
-                Button {
-                    model.startRecording(microphone: microphones.selection)
-                } label: {
-                    Label("Start recording", systemImage: "record.circle")
-                }
-                .keyboardShortcut("r")
-                TextField("Meeting title", text: $title)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 260)
                 Picker("Microphone", selection: $microphones.selection) {
                     ForEach(microphones.devices) { device in
                         Text(device.name).tag(Optional(device))
                     }
                 }
-                .frame(maxWidth: 280)
+                .frame(maxWidth: 300)
             }
             Spacer()
             if let message = model.lastRecordingMessage {

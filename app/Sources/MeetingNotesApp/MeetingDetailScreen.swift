@@ -1,8 +1,10 @@
 // One meeting: summary, transcript, notes, chat, and speakers, with Reveal
 // in Finder and Retry where processing failed.
 
+import AppKit
 import MeetingNotesCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct MeetingDetailScreen: View {
     @EnvironmentObject var model: AppModel
@@ -13,6 +15,8 @@ struct MeetingDetailScreen: View {
     @State private var notesDraft = ""
     @State private var titleDraft: String?
     @FocusState private var titleFocused: Bool
+    @State private var lastSavedNotes = ""
+    @FocusState private var notesFocused: Bool
     @State private var chatHistory: [(question: String, answer: String)] = []
     @State private var chatQuestion = ""
     @State private var chatBusy = false
@@ -58,6 +62,33 @@ struct MeetingDetailScreen: View {
         detail = fresh
         if !keepingDraft || notesDraft.isEmpty {
             notesDraft = fresh.notes
+            lastSavedNotes = fresh.notes
+        }
+    }
+
+    private func saveNotes() {
+        let text = notesDraft
+        guard text != lastSavedNotes else { return }
+        lastSavedNotes = text
+        Task { try? await model.client.saveNotes(meetingID, text: text) }
+    }
+
+    private func pasteImageFromPasteboard() {
+        let pasteboard = NSPasteboard.general
+        let png = pasteboard.data(forType: .png)
+            ?? pasteboard.data(forType: .tiff).flatMap {
+                NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:])
+            }
+        guard let png else { return }
+        Task {
+            // Typed text first, so the backend appends the image link after it.
+            try? await model.client.saveNotes(meetingID, text: notesDraft)
+            _ = try? await model.client.pasteImage(meetingID, data: png)
+            if let fresh = try? await model.client.meeting(meetingID) {
+                detail = fresh
+                notesDraft = fresh.notes
+                lastSavedNotes = fresh.notes
+            }
         }
     }
 
@@ -126,16 +157,20 @@ struct MeetingDetailScreen: View {
             VStack(alignment: .leading) {
                 TextEditor(text: $notesDraft)
                     .font(.body)
-                HStack {
-                    Text("Your notes feed into the summary and are never rewritten.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Save notes") {
-                        Task { try? await model.client.saveNotes(meetingID, text: notesDraft) }
+                    .focused($notesFocused)
+                    .onPasteCommand(of: [UTType.image]) { _ in
+                        pasteImageFromPasteboard()
                     }
-                }
+                    .onChange(of: notesFocused) { _, focused in
+                        if !focused { saveNotes() }
+                    }
+                Text("Notes save on their own and feed into the summary; they are "
+                     + "never rewritten. Paste screenshots straight in; they are "
+                     + "stored with the meeting.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             .padding()
+            .onDisappear { saveNotes() }
         case "Chat":
             VStack(alignment: .leading, spacing: 8) {
                 ScrollView {

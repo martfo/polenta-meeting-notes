@@ -39,7 +39,7 @@ def stage(tmp_path):
 def test_ac_3_4_a_dmg_staging_layout(tmp_path):
     staging = stage(tmp_path)
 
-    assert (staging / "MeetingNotes.app/Contents/MacOS/MeetingNotesApp").exists()
+    assert (staging / "Polenta Meeting Notes.app/Contents/MacOS/MeetingNotesApp").exists()
     applications = staging / "Applications"
     assert applications.is_symlink() and str(applications.readlink()) == "/Applications"
     readme = staging / "Read me first.txt"

@@ -9,7 +9,7 @@ WEIGHT_SUFFIXES = {".pt", ".pth", ".bin", ".ckpt", ".onnx", ".gguf", ".safetenso
 
 def test_ac_3_4_b_staged_resources_no_weights(tmp_path):
     staging = stage(tmp_path)
-    resources = staging / "MeetingNotes.app/Contents/Resources"
+    resources = staging / "Polenta Meeting Notes.app/Contents/Resources"
 
     for bundled in (
         "language/american_to_british.json",

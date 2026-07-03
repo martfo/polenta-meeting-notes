@@ -17,6 +17,11 @@ final class AppModel: ObservableObject {
     let client = BackendClient()
     let capture = CaptureController()
     let calendar = CalendarWatcher()
+    let microphones = MicrophoneListModel()
+
+    /// The title carried from an accepted calendar offer; the meeting can be
+    /// renamed afterwards by clicking its title.
+    var pendingTitle: String?
     private(set) var supervisor: BackendSupervisor?
     private(set) var coordinator: RecordingCoordinator?
 
@@ -120,13 +125,15 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func stopRecording(title: String) {
+    func stopRecording() {
         guard let coordinator else { return }
         let (wavData, source) = capture.stop()
+        let title = pendingTitle ?? "Meeting"
+        pendingTitle = nil
         do {
             let outcome = try coordinator.stop(
                 wavData: wavData,
-                title: title.isEmpty ? "Meeting" : title,
+                title: title,
                 source: source)
             switch outcome {
             case .enqueued(let meetingID):

@@ -7,7 +7,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_DIR="$ROOT/dist/MeetingNotes.app"
+APP_DIR="$ROOT/dist/Polenta Meeting Notes.app"
 IDENTITY="${SIGNING_IDENTITY:-MeetingNotes Local Signing}"
 
 echo "==> building the Swift app (release)"
@@ -23,6 +23,7 @@ if [ -d "$BIN/MeetingNotes_MeetingNotesApp.bundle" ]; then
   cp -R "$BIN/MeetingNotes_MeetingNotesApp.bundle" "$APP_DIR/Contents/Resources/"
 fi
 cp "$ROOT/app/Support/Info.plist" "$APP_DIR/Contents/Info.plist"
+cp "$ROOT/app/Support/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 
 echo "==> bundling resources"
 RES="$APP_DIR/Contents/Resources"

@@ -17,9 +17,9 @@ if [ "${1:-}" = "--stage-only" ]; then
   STAGE_ONLY=1
   shift
 fi
-APP_PATH="${1:-$ROOT/dist/MeetingNotes.app}"
+APP_PATH="${1:-$ROOT/dist/Polenta Meeting Notes.app}"
 STAGING="${2:-$ROOT/dist/dmg-staging}"
-DMG="$ROOT/dist/MeetingNotes.dmg"
+DMG="$ROOT/dist/PolentaMeetingNotes.dmg"
 
 if [ ! -d "$APP_PATH" ]; then
   echo "error: no app bundle at $APP_PATH (run make app-bundle first)" >&2
@@ -29,12 +29,12 @@ fi
 echo "==> staging $STAGING"
 rm -rf "$STAGING"
 mkdir -p "$STAGING"
-cp -R "$APP_PATH" "$STAGING/MeetingNotes.app"
+cp -R "$APP_PATH" "$STAGING/Polenta Meeting Notes.app"
 ln -s /Applications "$STAGING/Applications"
 cat > "$STAGING/Read me first.txt" <<'EOF'
-Installing MeetingNotes
+Installing Polenta Meeting Notes
 
-1. Drag MeetingNotes.app onto the Applications folder alongside it.
+1. Drag Polenta Meeting Notes.app onto the Applications folder alongside it.
 2. The first time only: right-click (or Control-click) the app in
    Applications and choose Open, then Open again in the dialogue. This is
    needed because the app is signed locally rather than notarised.
@@ -54,5 +54,5 @@ fi
 
 echo "==> building $DMG"
 rm -f "$DMG"
-hdiutil create -volname "MeetingNotes" -srcfolder "$STAGING" -ov -format UDZO "$DMG"
+hdiutil create -volname "Polenta Meeting Notes" -srcfolder "$STAGING" -ov -format UDZO "$DMG"
 echo "==> built $DMG"

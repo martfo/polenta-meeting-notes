@@ -108,6 +108,15 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         return suggestion.folder
     }
 
+    func pasteImage(_ id: String, data: Data, suffix: String = "png") async throws -> String {
+        struct Payload: Encodable { let data_base64: String; let suffix: String }
+        struct Response: Codable { let path: String }
+        let response: Response = try await send(
+            "POST", "/meetings/\(id)/notes/image",
+            encodable: Payload(data_base64: data.base64EncodedString(), suffix: suffix))
+        return response.path
+    }
+
     func setAttendees(_ id: String, attendees: [MeetingAttendee]) async throws {
         struct Payload: Encodable { let attendees: [MeetingAttendee] }
         let _: [String: AnyDecodable] = try await send(

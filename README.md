@@ -1,4 +1,4 @@
-# Meeting Notes
+# Polenta Meeting Notes
 
 A private, offline meeting notes app for macOS. It records a meeting, transcribes it locally
 with speaker labels, writes a structured summary, and lets you chat with one transcript or
@@ -100,7 +100,7 @@ In this order:
 
 1. Install LM Studio, load a model (a non-thinking instruct model works best), and make
    sure its local server is on, on port 1234.
-2. Open the MeetingNotes .dmg and drag the app to Applications.
+2. Open the Polenta Meeting Notes .dmg and drag the app to Applications.
 3. Right-click the app in Applications and choose Open, then Open again. This one-time
    step is needed because the app is signed locally rather than notarised.
 4. Pick where the vault should live, or point at an existing vault to open it as it is.
