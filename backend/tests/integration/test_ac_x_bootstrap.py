@@ -149,7 +149,9 @@ def test_notes_change_summary_regeneration_rules(conn, vault, stages, fixtures_d
     from meetingnotes.storage import meetings as m
 
     assert m.get_meeting(conn, meeting_id)["summary_edited"] == 0
-    assert queued_summarise() == 2
+    # Still one job: the earlier queued regeneration serves this too, so the
+    # dedupe holds across the whole flow.
+    assert queued_summarise() == 1
 
 
 def test_attendee_prefill_endpoint(conn, vault, stages):
