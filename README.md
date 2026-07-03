@@ -10,6 +10,8 @@ machine while the app is in use.
 - A Mac running macOS 14.4 or later, Apple Silicon.
 - LM Studio, with a model loaded and its local server running on port 1234. A non-thinking
   instruct model works best for clean summaries, for example a current Qwen instruct model.
+- ffmpeg, which the transcription pipeline uses to read audio. Install it once with
+  `brew install ffmpeg`.
 - FileVault turned on. The app keeps your meetings as files in a vault folder and relies on
   FileVault for encryption at rest.
 

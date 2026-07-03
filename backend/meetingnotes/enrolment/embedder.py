@@ -13,17 +13,47 @@ from meetingnotes.pipeline.segments import Segment
 EMBEDDING_MODEL = "pyannote/embedding"
 
 
+def _load_waveform(audio_path: Path) -> dict:
+    """A WAV as the in-memory dict pyannote accepts: waveform (channel, time)
+    plus sample rate."""
+    import wave
+
+    import torch
+
+    with wave.open(str(audio_path), "rb") as w:
+        assert w.getsampwidth() == 2, "vault audio is 16-bit PCM"
+        frames = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+        channels = w.getnchannels()
+        waveform = frames.reshape(-1, channels).T.astype(np.float32) / 32768.0
+        return {
+            "waveform": torch.from_numpy(waveform.copy()),
+            "sample_rate": w.getframerate(),
+        }
+
+
 class PyannoteSpeakerEmbedder:
     def __init__(self, hf_token: str | None = None):
         from pyannote.audio import Inference, Model
 
-        model = Model.from_pretrained(EMBEDDING_MODEL, use_auth_token=hf_token)
+        # pyannote.audio 4 takes token=, not the older use_auth_token=.
+        model = Model.from_pretrained(EMBEDDING_MODEL, token=hf_token)
         self._inference = Inference(model, window="whole")
 
     def embed_span(self, audio_path: Path, start: float, end: float) -> np.ndarray:
         from pyannote.core import Segment as Span
 
-        return np.asarray(self._inference.crop(str(audio_path), Span(start, end))).reshape(-1)
+        # Audio goes in preloaded, not as a path: pyannote 4's file decoding
+        # needs torchcodec and FFmpeg libraries, and our vault WAVs are plain
+        # 16 kHz mono PCM that the standard library reads fine.
+        audio = _load_waveform(audio_path)
+        rate = audio["sample_rate"]
+        # pyannote refuses a chunk whose end reaches the file duration, so a
+        # whole-file or boundary span is clamped one sample short.
+        duration = audio["waveform"].shape[1] / rate
+        end = min(end, duration - 1.0 / rate)
+        return np.asarray(
+            self._inference.crop(audio, Span(start, end))
+        ).reshape(-1)
 
     def cluster_voiceprints(
         self, audio_path: Path, segments: list[Segment], min_span_s: float = 0.5,

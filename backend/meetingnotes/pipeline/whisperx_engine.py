@@ -54,7 +54,7 @@ class WhisperXEngine:
             from whisperx.diarize import DiarizationPipeline
 
             self._diarise_pipeline = DiarizationPipeline(
-                model_name=DIARISATION_MODEL, use_auth_token=self._hf_token, device=DEVICE
+                model_name=DIARISATION_MODEL, token=self._hf_token, device=DEVICE
             )
         kwargs = {}
         if num_speakers is not None:

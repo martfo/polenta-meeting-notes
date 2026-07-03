@@ -32,7 +32,14 @@
       "Bash(chmod +x \"/Users/dtrb/Work/Dtrb/Code projects/mieliepap/scripts/\"*.sh)",
       "Bash(rm unit/test_ac_3_4_dmg_contents.py integration/test_ac_3_4_dmg_staging.py)",
       "Read(//Users/dtrb/Work/Dtrb/Code projects/**)",
-      "Bash(SKIP_SIGNING=1 make dmg)"
+      "Bash(SKIP_SIGNING=1 make dmg)",
+      "Bash(security delete-keychain *)",
+      "Bash(bash -n scripts/make_signing_cert.sh)",
+      "Bash(git commit -q -m 'Signing cert script: import PEM key and cert directly, OpenSSL 3 PKCS12 is unreadable by the Security framework *)",
+      "Bash(make pipeline *)",
+      "Bash(sed -n '/ERRORS/,/FAILED\\\\|=== FAILURES/p' \"/private/tmp/claude-501/-Users-dtrb-Work-Dtrb-Code-projects-mieliepap/65e1c0b5-95e1-4a41-89c4-2eb5fa22bd41/tasks/bc88y7u0o.output\" | head -50)",
+      "Bash(awk '/ERROR at setup of test_ac_1_2_a/,/^----/' \"/private/tmp/claude-501/-Users-dtrb-Work-Dtrb-Code-projects-mieliepap/65e1c0b5-95e1-4a41-89c4-2eb5fa22bd41/tasks/bc88y7u0o.output\")",
+      "Bash(brew list *)"
     ]
   }
 }
