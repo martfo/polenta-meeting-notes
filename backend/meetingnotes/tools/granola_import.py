@@ -19,6 +19,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import re
+import shutil
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -141,13 +142,36 @@ def _split_attendees(value: str | None) -> list[str]:
 
 
 @dataclass
+class ImportFailure:
+    row: int  # 1-based CSV data row
+    title: str
+    reason: str
+
+
+@dataclass
 class ImportReport:
+    total_rows: int = 0
     imported: int = 0
     skipped: int = 0
+    empty: int = 0
     folders_created: list[str] = field(default_factory=list)
     mapped_columns: dict[str, str] = field(default_factory=dict)
     unmapped_columns: list[str] = field(default_factory=list)
+    failures: list[ImportFailure] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+    @property
+    def failed(self) -> int:
+        return len(self.failures)
+
+    @property
+    def accounted(self) -> int:
+        return self.imported + self.skipped + self.empty + self.failed
+
+    @property
+    def reconciled(self) -> bool:
+        """Every CSV data row must end up in exactly one bucket."""
+        return self.accounted == self.total_rows
 
 
 def import_granola_csv(
@@ -157,8 +181,11 @@ def import_granola_csv(
     indexer: Callable[[str], None] | None = None,
 ) -> ImportReport:
     """Import every row of a Granola CSV export into the vault. Idempotent:
-    rows already imported are skipped. `indexer`, when given, is called with
-    each new meeting id to add it to the search index."""
+    rows already imported are skipped. Every row lands in exactly one bucket
+    (imported, skipped as a duplicate, empty, or failed with a reason), and
+    the report reconciles that count against the number of rows read, so no
+    line is ever silently dropped. `indexer`, when given, adds each new
+    meeting to the search index."""
     reader = csv.DictReader(csv_text.splitlines())
     headers = reader.fieldnames or []
     mapping, unmapped = map_columns(headers)
@@ -170,10 +197,23 @@ def import_granola_csv(
             + ", ".join(headers))
         return report
 
+    rows = list(reader)
+    report.total_rows = len(rows)
     existing_folders = {name: fol.folder_id(conn, name) for name in fol.list_folders(conn)}
 
-    for index, row in enumerate(reader):
-        title = (row.get(mapping.get("title", ""), "") or "").strip() or f"Granola note {index + 1}"
+    for index, row in enumerate(rows):
+        row_number = index + 1
+        raw_title = (row.get(mapping.get("title", ""), "") or "").strip()
+        summary = (row.get(mapping.get("summary", ""), "") or "").strip()
+        transcript_text = (row.get(mapping.get("transcript", ""), "") or "").strip()
+
+        # A wholly empty row carries nothing to import; account for it, do not
+        # create a blank meeting.
+        if not raw_title and not summary and not transcript_text:
+            report.empty += 1
+            continue
+
+        title = raw_title or f"Granola note {row_number}"
         date = _parse_date(row.get(mapping.get("date", "")))
         meeting_id = _meeting_id(row, mapping, title, date)
 
@@ -181,31 +221,41 @@ def import_granola_csv(
             report.skipped += 1
             continue
 
-        summary = (row.get(mapping.get("summary", ""), "") or "").strip()
-        transcript_text = (row.get(mapping.get("transcript", ""), "") or "").strip()
-        segments = parse_transcript(transcript_text)
-        attendees = _split_attendees(row.get(mapping.get("attendees", "")))
-        folder_name = (row.get(mapping.get("folder", ""), "") or "").strip()
+        # Each row is written atomically: any error rolls back the partial
+        # meeting so no orphan row or folder is left behind, and the row is
+        # recorded as a failure rather than lost.
+        try:
+            segments = parse_transcript(transcript_text)
+            attendees = _split_attendees(row.get(mapping.get("attendees", "")))
+            folder_name = (row.get(mapping.get("folder", ""), "") or "").strip()
 
-        _write_meeting(conn, vault, meeting_id, title, date, summary, segments, attendees)
+            _write_meeting(conn, vault, meeting_id, title, date, summary, segments, attendees)
 
-        if folder_name:
-            if folder_name not in existing_folders:
-                try:
+            if folder_name:
+                if folder_name not in existing_folders:
                     existing_folders[folder_name] = fol.create_folder(conn, folder_name)
                     report.folders_created.append(folder_name)
-                except ValueError:
-                    folder_name = ""
-            if folder_name:
                 m.set_folder(conn, meeting_id, existing_folders[folder_name])
 
-        report.imported += 1
+            report.imported += 1
+        except Exception as exc:
+            conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
+            conn.commit()
+            shutil.rmtree(vault.meeting_dir(meeting_id), ignore_errors=True)
+            report.failures.append(ImportFailure(row_number, title, str(exc)))
+            continue
+
         if indexer is not None:
             try:
                 indexer(meeting_id)
-            except Exception as exc:  # indexing is best effort
+            except Exception as exc:  # indexing is best effort; the meeting is in
                 report.warnings.append(f"could not index {meeting_id}: {exc}")
 
+    if not report.reconciled:
+        report.warnings.append(
+            f"reconciliation mismatch: {report.imported} imported + {report.skipped} "
+            f"skipped + {report.empty} empty + {report.failed} failed = {report.accounted}, "
+            f"but {report.total_rows} rows were read")
     return report
 
 

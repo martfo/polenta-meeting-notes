@@ -164,12 +164,23 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         let _: [String: AnyDecodable] = try await put("/meetings/\(id)/title", body: ["name": title])
     }
 
+    struct GranolaImportFailure: Codable {
+        let row: Int
+        let title: String
+        let reason: String
+    }
+
     struct GranolaImportResult: Codable {
+        let total_rows: Int
         let imported: Int
         let skipped: Int
+        let empty: Int
+        let failed: Int
+        let reconciled: Bool
         let folders_created: [String]
         let mapped_columns: [String: String]
         let unmapped_columns: [String]
+        let failures: [GranolaImportFailure]
         let warnings: [String]
     }
 

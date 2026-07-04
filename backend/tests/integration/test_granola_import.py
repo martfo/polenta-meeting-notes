@@ -119,6 +119,94 @@ def test_import_without_recognised_columns_reports_clearly(conn, vault):
     assert report.warnings and "recognised" in report.warnings[0].lower()
 
 
+def test_every_row_is_reconciled(conn, vault):
+    """Imported, duplicate, empty, and failed rows together account for every
+    line read, so nothing is silently dropped."""
+    text = _csv(
+        [
+            {"Title": "Good one", "Summary": "S", "Transcript": "Ben: hi", "id": "doc-1"},
+            {"Title": "Good two", "Summary": "S", "Transcript": "Ben: hi", "id": "doc-2"},
+            {"Title": "", "Summary": "", "Transcript": "", "id": ""},          # empty
+            {"Title": "Good one", "Summary": "S", "Transcript": "Ben: hi", "id": "doc-1"},  # dup
+        ],
+        ["Title", "Summary", "Transcript", "id"],
+    )
+    report = import_granola_csv(conn, vault, text)
+
+    assert report.total_rows == 4
+    assert report.imported == 2
+    assert report.skipped == 1
+    assert report.empty == 1
+    assert report.failed == 0
+    assert report.reconciled
+    assert report.accounted == report.total_rows
+
+
+def test_a_failing_row_is_recorded_and_rolled_back(conn, vault, monkeypatch):
+    """A row that fails mid-write is recorded as a failure, leaves no orphan
+    meeting behind, and does not stop the rest of the import."""
+    import meetingnotes.tools.granola_import as gi
+
+    real_write = gi._write_meeting
+    calls = {"n": 0}
+
+    def flaky_write(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            real_write(*args, **kwargs)  # partially create, then blow up
+            raise RuntimeError("disk gremlin")
+        return real_write(*args, **kwargs)
+
+    monkeypatch.setattr(gi, "_write_meeting", flaky_write)
+
+    text = _csv(
+        [
+            {"Title": "Boom", "Summary": "S", "Transcript": "Ben: hi", "id": "doc-boom"},
+            {"Title": "Fine", "Summary": "S", "Transcript": "Ben: hi", "id": "doc-fine"},
+        ],
+        ["Title", "Summary", "Transcript", "id"],
+    )
+    report = import_granola_csv(conn, vault, text)
+
+    assert report.imported == 1
+    assert report.failed == 1
+    assert report.failures[0].title == "Boom"
+    assert "disk gremlin" in report.failures[0].reason
+    assert report.reconciled
+    # No orphan left from the failed row.
+    assert not vault.meeting_dir("granola-docboom").exists()
+    assert not _meeting_exists_helper(conn, "granola-docboom")
+    # The later row still imported.
+    assert _meeting_exists_helper(conn, "granola-docfine")
+
+
+def _meeting_exists_helper(conn, meeting_id):
+    return conn.execute("SELECT 1 FROM meetings WHERE id = ?", (meeting_id,)).fetchone() is not None
+
+
+def test_new_folders_created_and_notes_filed(conn, vault):
+    """Folders in the export that do not exist yet are created and their
+    notes filed into them."""
+    from meetingnotes.storage import folders as fol
+
+    assert fol.list_folders(conn) == []
+    text = _csv(
+        [
+            {"Title": "A", "Summary": "S", "Transcript": "x", "Workspace": "New Folder One", "id": "1"},
+            {"Title": "B", "Summary": "S", "Transcript": "x", "Workspace": "New Folder Two", "id": "2"},
+            {"Title": "C", "Summary": "S", "Transcript": "x", "Workspace": "New Folder One", "id": "3"},
+        ],
+        ["Title", "Summary", "Transcript", "Workspace", "id"],
+    )
+    report = import_granola_csv(conn, vault, text)
+
+    assert set(report.folders_created) == {"New Folder One", "New Folder Two"}
+    assert set(fol.list_folders(conn)) == {"New Folder One", "New Folder Two"}
+    listing = {g["folder"]: [x["title"] for x in g["meetings"]] for g in m.library_listing(conn)}
+    assert set(listing["New Folder One"]) == {"A", "C"}
+    assert listing["New Folder Two"] == ["B"]
+
+
 def test_note_without_summary_is_pending(conn, vault):
     text = _csv(
         [{"Title": "No summary", "Transcript": "Ben: hi", "id": "doc-9"}],

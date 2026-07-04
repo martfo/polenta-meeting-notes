@@ -418,11 +418,18 @@ def create_app(state: AppState) -> FastAPI:
 
         report = import_granola_csv(conn, vault, request.csv_text, indexer=indexer)
         return {
+            "total_rows": report.total_rows,
             "imported": report.imported,
             "skipped": report.skipped,
+            "empty": report.empty,
+            "failed": report.failed,
+            "reconciled": report.reconciled,
             "folders_created": report.folders_created,
             "mapped_columns": report.mapped_columns,
             "unmapped_columns": report.unmapped_columns,
+            "failures": [
+                {"row": f.row, "title": f.title, "reason": f.reason} for f in report.failures
+            ],
             "warnings": report.warnings,
         }
 

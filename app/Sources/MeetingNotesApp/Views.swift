@@ -245,15 +245,25 @@ struct SettingsSheet: View {
             do {
                 let result = try await model.client.importGranolaCSV(csv)
                 await model.refreshLibrary()
-                if result.imported == 0 && !result.warnings.isEmpty {
+                if result.imported == 0 && result.total_rows == 0 && !result.warnings.isEmpty {
                     importStatus = result.warnings.joined(separator: " ")
                 } else {
-                    var parts = ["Imported \(result.imported) meeting(s)."]
-                    if result.skipped > 0 { parts.append("\(result.skipped) already present.") }
+                    // A full tally, so every line of the CSV is accounted for.
+                    var parts = ["\(result.total_rows) rows: \(result.imported) imported"]
+                    if result.skipped > 0 { parts.append("\(result.skipped) already present") }
+                    if result.empty > 0 { parts.append("\(result.empty) empty") }
+                    if result.failed > 0 { parts.append("\(result.failed) failed") }
+                    var status = parts.joined(separator: ", ") + "."
                     if !result.folders_created.isEmpty {
-                        parts.append("New folders: \(result.folders_created.joined(separator: ", ")).")
+                        status += " New folders: \(result.folders_created.joined(separator: ", "))."
                     }
-                    importStatus = parts.joined(separator: " ")
+                    if !result.reconciled {
+                        status += " Warning: the totals did not reconcile; see logs."
+                    }
+                    if let firstFailure = result.failures.first {
+                        status += " First failure: row \(firstFailure.row) (\(firstFailure.title)): \(firstFailure.reason)"
+                    }
+                    importStatus = status
                 }
             } catch {
                 importStatus = "Import failed: \(error.localizedDescription)"

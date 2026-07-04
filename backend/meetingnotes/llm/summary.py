@@ -20,7 +20,7 @@ from meetingnotes.storage.frontmatter import write_meeting_md
 from meetingnotes.storage.vault import Vault
 
 MANDATORY_SECTIONS = ["core items discussed", "next steps"]
-OPTIONAL_SECTIONS = ["open questions"]
+OPTIONAL_SECTIONS = ["decisions", "open questions"]
 
 HEADING = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 

@@ -52,7 +52,9 @@ public enum RuntimeLocation {
 /// 17: the model's Sources trailer is always stripped from library answers.
 /// 18: library chat prompt hardened against false negatives; wider retrieval.
 /// 19: import meetings from a Granola CSV export.
-public let runtimeVersion = "19"
+/// 20: Granola-style bulleted summary prompt with a Decisions section; the
+///     import reconciles every CSV row.
+public let runtimeVersion = "20"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

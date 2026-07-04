@@ -200,11 +200,15 @@ summary_status: ready
 ```
 ## Core items discussed
 ## Next Steps
+## Decisions
 ## Open Questions
 ```
 
-Core items discussed and Next Steps are mandatory. Open Questions is optional. The validator
-matches a level-two heading by its trimmed text, case-insensitive.
+Core items discussed and Next Steps are mandatory. Decisions and Open Questions are optional
+and are left out when there is nothing to record. The validator matches a level-two heading by
+its trimmed text, case-insensitive. The default prompt is Granola-style: each core item is a
+bold sub-heading with bullets beneath, and Next Steps, Decisions, and Open Questions are
+bulleted.
 
 ### Folder suggestion contract
 
