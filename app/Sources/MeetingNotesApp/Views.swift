@@ -88,31 +88,45 @@ struct MainSplit: View {
     @State private var showLibraryChat = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            StatusBanner()
-            NavigationSplitView {
-                LibraryList()
-            } detail: {
-                if let meetingID = model.selectedMeetingID {
-                    MeetingDetailScreen(meetingID: meetingID)
-                        .id(meetingID)
-                } else {
-                    Text("Choose a meeting, or press Start to record one.")
-                        .foregroundStyle(.secondary)
+        ZStack {
+            VStack(spacing: 0) {
+                StatusBanner()
+                NavigationSplitView {
+                    LibraryList()
+                } detail: {
+                    if let meetingID = model.selectedMeetingID {
+                        MeetingDetailScreen(meetingID: meetingID)
+                            .id(meetingID)
+                    } else {
+                        Text("Choose a meeting, or press Start to record one.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                Divider()
+                RecordingBar(capture: model.capture, calendar: model.calendar,
+                             microphones: model.microphones)
             }
-            Divider()
-            RecordingBar(capture: model.capture, calendar: model.calendar,
-                         microphones: model.microphones)
+
+            // The library chat fills the whole app area, so leaving it to read
+            // a cited meeting and returning keeps the conversation.
+            if showLibraryChat {
+                LibraryChatPanel(
+                    chat: model.libraryChat,
+                    onOpenMeeting: { meetingID in
+                        model.selectedMeetingID = meetingID
+                        showLibraryChat = false
+                    },
+                    onClose: { showLibraryChat = false })
+                    .environmentObject(model)
+                    .transition(.opacity)
+            }
         }
+        .animation(.easeInOut(duration: 0.15), value: showLibraryChat)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Ask the library") { showLibraryChat = true }
                 RecordToolbarButton(capture: model.capture)
             }
-        }
-        .sheet(isPresented: $showLibraryChat) {
-            LibraryChatSheet().environmentObject(model)
         }
     }
 }

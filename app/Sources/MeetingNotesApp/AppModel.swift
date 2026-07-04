@@ -18,6 +18,18 @@ final class AppModel: ObservableObject {
     let capture = CaptureController()
     let calendar = CalendarWatcher()
     let microphones = MicrophoneListModel()
+    let libraryChat = LibraryChatModel()
+
+    /// The meeting's title for a citation link, falling back to the id while
+    /// the library list has not loaded it.
+    func title(for meetingID: String) -> String {
+        for group in library {
+            if let meeting = group.meetings.first(where: { $0.id == meetingID }) {
+                return meeting.title
+            }
+        }
+        return meetingID
+    }
 
     /// The title carried from an accepted calendar offer; the meeting can be
     /// renamed afterwards by clicking its title.
