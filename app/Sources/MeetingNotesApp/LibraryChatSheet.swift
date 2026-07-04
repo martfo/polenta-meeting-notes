@@ -53,24 +53,31 @@ struct LibraryChatPanel: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Text("Ask the library").font(.title2).bold()
-            Picker("Search in", selection: $chat.allFolders) {
-                Text("One folder").tag(false)
-                Text("All folders").tag(true)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Ask the library").font(.title2).bold()
+                Spacer()
+                Button("Clear") { chat.clear() }
+                    .disabled(chat.history.isEmpty)
+                Button("Close") { onClose() }
             }
-            .pickerStyle(.segmented)
-            .fixedSize()
-            if !chat.allFolders {
-                Picker("Folder", selection: $chat.folder) {
-                    ForEach(folders, id: \.self) { Text($0).tag(Optional($0)) }
+            HStack(spacing: 10) {
+                Text("Search in").foregroundStyle(.secondary)
+                Picker("", selection: $chat.allFolders) {
+                    Text("One folder").tag(false)
+                    Text("All folders").tag(true)
                 }
-                .frame(maxWidth: 220)
+                .pickerStyle(.segmented)
+                .fixedSize()
+                if !chat.allFolders {
+                    Text("Folder").foregroundStyle(.secondary)
+                    Picker("", selection: $chat.folder) {
+                        ForEach(folders, id: \.self) { Text($0).tag(Optional($0)) }
+                    }
+                    .frame(maxWidth: 220)
+                }
+                Spacer()
             }
-            Spacer()
-            Button("Clear") { chat.clear() }
-                .disabled(chat.history.isEmpty)
-            Button("Close") { onClose() }
         }
         .padding(12)
     }
@@ -79,7 +86,7 @@ struct LibraryChatPanel: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    if chat.history.isEmpty && chat.problem == nil {
+                    if chat.history.isEmpty && chat.problem == nil && !chat.busy {
                         Text("Ask a question to search across your meetings, for "
                              + "example what someone said or which meeting a topic "
                              + "came up in.")
@@ -116,7 +123,7 @@ struct LibraryChatPanel: View {
     private var inputBar: some View {
         HStack {
             TextField("What was said about…", text: $chat.question)
-                .textFieldStyle(.roundedBorder)
+                .softField()
                 .onSubmit { ask() }
             Button("Ask") { ask() }
                 .keyboardShortcut(.defaultAction)

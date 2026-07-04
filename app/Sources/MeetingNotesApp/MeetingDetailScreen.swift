@@ -307,7 +307,7 @@ struct MeetingDetailScreen: View {
     private var chatInputBar: some View {
         HStack {
             TextField("Ask about this meeting…", text: $chatQuestion)
-                .textFieldStyle(.roundedBorder)
+                .softField()
                 .onSubmit { ask() }
             if chatBusy { ProgressView().controlSize(.small) }
             if !chatHistory.isEmpty && !chatDrawerOpen {
@@ -523,7 +523,7 @@ struct ChatDrawer: View {
             Divider()
             HStack {
                 TextField("Follow up…", text: $question)
-                    .textFieldStyle(.roundedBorder)
+                    .softField()
                     .onSubmit { onAsk() }
                 if busy { ProgressView().controlSize(.small) }
             }

@@ -125,7 +125,7 @@ struct MainSplit: View {
         .animation(.easeInOut(duration: 0.15), value: showLibraryChat)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                Button("Ask the library") { showLibraryChat = true }
+                Button("Ask the library") { showLibraryChat.toggle() }
                 RecordToolbarButton(capture: model.capture)
             }
         }
@@ -156,6 +156,25 @@ struct RecordToolbarButton: View {
             .keyboardShortcut("r")
         }
     }
+}
+
+/// A text input with a fill slightly lighter than its surround and a soft
+/// border, so the box stays visible against the dark background rather than
+/// melting into it.
+struct SoftFieldBackground: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .textFieldStyle(.plain)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 8)
+            .background(Color.primary.opacity(0.07))
+            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.12)))
+    }
+}
+
+extension View {
+    func softField() -> some View { modifier(SoftFieldBackground()) }
 }
 
 /// A rounded, filled pill: a light background with dark text stands out in the
@@ -346,12 +365,36 @@ struct SupervisorBanner: View {
     }
 }
 
+struct BrandHeader: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 22, height: 22)
+            Text("Polenta Meeting Notes")
+                .font(.headline)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+}
+
 struct LibraryList: View {
     @EnvironmentObject var model: AppModel
     // Folders start expanded; a folder the user collapses is remembered here.
     @State private var collapsed: Set<String> = []
 
     var body: some View {
+        VStack(spacing: 0) {
+            BrandHeader()
+            Divider()
+            meetingList
+        }
+        .navigationSplitViewColumnWidth(min: 240, ideal: 300)
+    }
+
+    private var meetingList: some View {
         List(selection: $model.selectedMeetingID) {
             ForEach(model.library) { group in
                 Section(isExpanded: expanded(group.id)) {
@@ -366,7 +409,6 @@ struct LibraryList: View {
         .listStyle(.sidebar)
         .refreshable { await model.refreshLibrary() }
         .task { await model.refreshLibrary() }
-        .navigationSplitViewColumnWidth(min: 240, ideal: 300)
     }
 
     private func expanded(_ id: String) -> Binding<Bool> {
