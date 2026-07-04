@@ -17,6 +17,10 @@ struct MeetingNotesApp: App {
                 .frame(minWidth: 980, minHeight: 640)
                 .onAppear {
                     if model.vaultURL != nil { model.bootBackend() }
+                    // The global hotkey toggles recording even when another
+                    // app has focus.
+                    GlobalHotKey.shared.action = { [weak model] in model?.toggleRecording() }
+                    GlobalHotKey.shared.applyFromDefaults()
                 }
         }
     }
@@ -142,9 +146,9 @@ struct MainSplit: View {
 struct RecordToolbarButton: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject var capture: CaptureController
+    // The keys are read so the tooltip updates when the shortcut changes.
     @AppStorage(RecordShortcut.key) private var shortcutKey = RecordShortcut.defaultKey
-
-    private var shortcut: KeyEquivalent { KeyEquivalent(shortcutKey.first ?? "r") }
+    @AppStorage(RecordShortcut.modifiersKey) private var modifierRaw = RecordShortcut.defaultModifiers.rawValue
 
     var body: some View {
         if capture.isCapturing {
@@ -155,8 +159,7 @@ struct RecordToolbarButton: View {
                     .labelStyle(.titleAndIcon)
             }
             .buttonStyle(PillButtonStyle(background: .red, foreground: .white))
-            .keyboardShortcut(shortcut, modifiers: .command)
-            .help("Stop recording (\u{2318}\(shortcutKey.uppercased()))")
+            .help("Stop recording (\(RecordShortcut.displayString()))")
         } else {
             Button {
                 model.startRecording(microphone: model.microphones.selection)
@@ -165,15 +168,9 @@ struct RecordToolbarButton: View {
                     .labelStyle(.titleAndIcon)
             }
             .buttonStyle(PillButtonStyle(background: Color(white: 0.96), foreground: .black))
-            .keyboardShortcut(shortcut, modifiers: .command)
-            .help("Start recording (\u{2318}\(shortcutKey.uppercased()))")
+            .help("Start recording (\(RecordShortcut.displayString()))")
         }
     }
-}
-
-enum RecordShortcut {
-    static let key = "recordShortcutKey"
-    static let defaultKey = "r"
 }
 
 /// A text input with a fill slightly lighter than its surround and a soft
@@ -219,6 +216,8 @@ struct SettingsSheet: View {
     @AppStorage(Appearance.sizeKey) private var baseFontSize = Appearance.defaultSize
     @AppStorage(Appearance.designKey) private var fontDesign = "system"
     @AppStorage(RecordShortcut.key) private var recordShortcutKey = RecordShortcut.defaultKey
+    @AppStorage(RecordShortcut.modifiersKey) private var modifierRaw = RecordShortcut.defaultModifiers.rawValue
+    @State private var shortcutRegistered = true
     @State private var importStatus: String?
     @State private var importing = false
     @State private var promptRestored = false
@@ -241,23 +240,40 @@ struct SettingsSheet: View {
                     }
                 }
 
-                Section("Recording") {
-                    LabeledContent {
-                        HStack(spacing: 4) {
-                            Text("\u{2318}").foregroundStyle(.secondary)
-                            TextField("", text: $recordShortcutKey)
-                                .frame(width: 32)
-                                .multilineTextAlignment(.center)
-                                .onChange(of: recordShortcutKey) { _, value in
-                                    let cleaned = value.lowercased().filter { $0.isLetter || $0.isNumber }
-                                    recordShortcutKey = String(cleaned.prefix(1).isEmpty ? "r" : cleaned.prefix(1))
-                                }
-                        }
-                    } label: {
-                        Label("Start and stop recording", systemImage: "keyboard")
-                        Text("The shortcut that toggles recording, always with the Command key.")
+                Section("Recording shortcut") {
+                    Text("A system-wide shortcut that starts and stops recording even "
+                         + "when another app, such as your call, has focus.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        Toggle("\u{2303} Control", isOn: modifier(.control))
+                        Toggle("\u{2325} Option", isOn: modifier(.option))
+                        Toggle("\u{21E7} Shift", isOn: modifier(.shift))
+                        Toggle("\u{2318} Command", isOn: modifier(.command))
+                    }
+                    .toggleStyle(.checkbox)
+                    HStack {
+                        Text("Key")
+                        TextField("", text: $recordShortcutKey)
+                            .frame(width: 40)
+                            .multilineTextAlignment(.center)
+                            .onChange(of: recordShortcutKey) { _, value in
+                                let cleaned = value.lowercased().filter { $0.isLetter || $0.isNumber }
+                                recordShortcutKey = cleaned.isEmpty ? "r" : String(cleaned.prefix(1))
+                                applyShortcut()
+                            }
+                        Spacer()
+                        Text(RecordShortcut.displayString())
+                            .font(.title3.monospaced())
+                            .foregroundStyle(.primary)
+                    }
+                    if !shortcutRegistered {
+                        Label("This combination could not be registered. It may need at "
+                              + "least one modifier, or another app may already use it.",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.caption).foregroundStyle(.orange)
                     }
                 }
+                .onChange(of: modifierRaw) { _, _ in applyShortcut() }
 
                 Section("Appearance") {
                     Picker("Font", selection: $fontDesign) {
@@ -312,6 +328,20 @@ struct SettingsSheet: View {
             .padding(12)
         }
         .frame(width: 480, height: 520)
+    }
+
+    private func modifier(_ mod: ShortcutModifiers) -> Binding<Bool> {
+        Binding(
+            get: { ShortcutModifiers(rawValue: modifierRaw).contains(mod) },
+            set: { on in
+                var set = ShortcutModifiers(rawValue: modifierRaw)
+                if on { set.insert(mod) } else { set.remove(mod) }
+                modifierRaw = set.rawValue
+            })
+    }
+
+    private func applyShortcut() {
+        shortcutRegistered = GlobalHotKey.shared.applyFromDefaults()
     }
 
     private func restorePrompt() {

@@ -139,6 +139,16 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Start or stop, whichever is not current. Driven by the global hotkey.
+    func toggleRecording() {
+        guard coordinator != nil else { return }
+        if capture.isCapturing {
+            stopRecording()
+        } else {
+            startRecording(microphone: microphones.selection)
+        }
+    }
+
     func stopRecording() {
         guard let coordinator else { return }
         let (wavData, source) = capture.stop()
