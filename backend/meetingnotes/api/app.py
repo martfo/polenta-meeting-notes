@@ -205,6 +205,17 @@ def create_app(state: AppState) -> FastAPI:
     def file_meeting(meeting_id: str, request: FolderRequest) -> dict:
         folder_id = fol.create_folder(conn, request.name)
         m.set_folder(conn, meeting_id, folder_id)
+        # The search chunks carry their own folder copy for scoped retrieval,
+        # so a refiled meeting must move in the index too.
+        if state.vector_store is not None:
+            try:
+                state.vector_store.set_meeting_folder(meeting_id, folder_id)
+            except Exception:
+                import logging
+
+                logging.getLogger("meetingnotes").warning(
+                    "updating the search index folder failed",
+                    extra={"meeting_id": meeting_id})
         return {"folder_id": folder_id}
 
     @app.post("/meetings/{meeting_id}/suggest-folder")

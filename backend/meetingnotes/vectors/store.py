@@ -65,6 +65,18 @@ class VectorStore:
         if table is not None:
             table.delete(f"meeting_id = '{meeting_id}'")
 
+    def set_meeting_folder(self, meeting_id: str, folder_id: int | None) -> None:
+        """Update the folder stored on a meeting's chunks when it is refiled,
+        so folder-scoped retrieval follows the move. No re-embedding: only the
+        folder column changes."""
+        table = self._table()
+        if table is None:
+            return
+        table.update(
+            where=f"meeting_id = '{meeting_id}'",
+            values={"folder_id": -1 if folder_id is None else int(folder_id)},
+        )
+
     def rows_for_meeting(self, meeting_id: str) -> list[dict[str, Any]]:
         table = self._table()
         if table is None:

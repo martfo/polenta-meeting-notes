@@ -145,6 +145,30 @@ def test_ac_2_1_e_citations_match_chunks(conn, vault, store, embedder, fixtures_
     assert set(result.citations) == {a, b}
 
 
+def test_refiling_moves_chunks_in_index(conn, vault, store, embedder):
+    """Moving a meeting to another folder updates the folder stored on its
+    search chunks, so folder-scoped retrieval follows the move."""
+    from meetingnotes.storage import meetings as m
+
+    original = f.create_folder(conn, "Inbox")
+    destination = f.create_folder(conn, "DesignTurbine")
+    meeting = seed_meeting(conn, vault, "2026-07-04_1000_a", "Adiyah convo", original,
+                           [("Adiyah", "The hydroponics budget was approved.")])
+    index_meeting(conn, vault, store, embedder, meeting)
+
+    # Refile it, as the folder endpoint does.
+    m.set_folder(conn, meeting, destination)
+    store.set_meeting_folder(meeting, destination)
+
+    # It is now found under the new folder and no longer under the old one.
+    in_new = retrieve(store, embedder, "hydroponics budget",
+                      scope=ChatScope.FOLDER, folder_id=destination)
+    assert {r["meeting_id"] for r in in_new} == {meeting}
+    in_old = retrieve(store, embedder, "hydroponics budget",
+                      scope=ChatScope.FOLDER, folder_id=original)
+    assert in_old == []
+
+
 def test_folder_scope_widens_when_empty(conn, vault, store, embedder, fixtures_dir):
     """A folder-scoped question with no match in that folder searches the
     whole vault rather than dead-ending, and says so."""
