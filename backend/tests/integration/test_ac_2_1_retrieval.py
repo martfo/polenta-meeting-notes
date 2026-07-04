@@ -138,6 +138,14 @@ def test_ac_2_1_e_citations_match_chunks(conn, vault, store, embedder, fixtures_
     assert result.citations == [a], "only the meeting the answer used"
     assert "Sources:" not in result.answer
 
+    # The model may reformat the id (a "meeting " prefix); the line is still
+    # matched and stripped, and the citation resolves.
+    prefixed = FakeLMClient(f"Ben covered the sensors.\n\nSources: meeting {a}")
+    result = ask_library(prefixed, store, embedder, "what about the sensors",
+                         scope=ChatScope.FOLDER, folder_id=clients)
+    assert result.citations == [a]
+    assert "Sources:" not in result.answer, "the model's trailer is removed"
+
     # A hallucinated source is ignored in favour of the honest fallback.
     lying = FakeLMClient("Something.\n\nSources: 2026-01-01_0000_never-happened")
     result = ask_library(lying, store, embedder, "what about the sensors",

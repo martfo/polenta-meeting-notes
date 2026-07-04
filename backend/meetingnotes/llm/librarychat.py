@@ -39,20 +39,26 @@ def extract_citations(answer: str, retrieved_ids: list[str]) -> tuple[str, list[
     """The meetings the answer drew on: the model's Sources line, validated
     against what was actually retrieved so nothing can be invented; the ids
     mentioned in the text as the next best; every retrieved meeting as the
-    honest fallback. The Sources line is stripped from the shown answer."""
+    honest fallback. The model's Sources line is always stripped from the
+    shown answer, since the app renders its own source links."""
     match = None
     for match in _SOURCES_LINE.finditer(answer):
         pass  # keep the last occurrence
+
+    cleaned = answer
     if match:
-        listed = {part.strip() for part in match.group(1).split(",")}
-        valid = [mid for mid in retrieved_ids if mid in listed]
-        if valid:
-            cleaned = (answer[:match.start()] + answer[match.end():]).strip()
-            return cleaned, valid
+        # Match ids as substrings of the line, since the model may reformat
+        # them (a "meeting " prefix, say) rather than list them verbatim.
+        line = match.group(1)
+        listed = [mid for mid in retrieved_ids if mid in line]
+        cleaned = (answer[:match.start()] + answer[match.end():]).strip()
+        if listed:
+            return cleaned, listed
+
     mentioned = [mid for mid in retrieved_ids if mid in answer]
     if mentioned:
-        return answer, mentioned
-    return answer, retrieved_ids
+        return cleaned, mentioned
+    return cleaned, retrieved_ids
 
 
 @dataclass

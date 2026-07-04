@@ -254,33 +254,49 @@ struct SupervisorBanner: View {
 
 struct LibraryList: View {
     @EnvironmentObject var model: AppModel
+    // Folders start expanded; a folder the user collapses is remembered here.
+    @State private var collapsed: Set<String> = []
 
     var body: some View {
         List(selection: $model.selectedMeetingID) {
             ForEach(model.library) { group in
-                Section(group.folder ?? "Unfiled") {
+                Section(isExpanded: expanded(group.id)) {
                     ForEach(group.meetings) { meeting in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(meeting.title).fontWeight(.medium)
-                            HStack(spacing: 6) {
-                                Text(meeting.date)
-                                if !meeting.attendees.isEmpty {
-                                    Text(meeting.attendees.joined(separator: ", "))
-                                        .lineLimit(1)
-                                }
-                                StatusLabel(meeting: meeting)
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        }
-                        .tag(meeting.id)
+                        meetingRow(meeting).tag(meeting.id)
                     }
+                } header: {
+                    Text(group.folder ?? "Unfiled")
                 }
             }
         }
+        .listStyle(.sidebar)
         .refreshable { await model.refreshLibrary() }
         .task { await model.refreshLibrary() }
         .navigationSplitViewColumnWidth(min: 240, ideal: 300)
+    }
+
+    private func expanded(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { !collapsed.contains(id) },
+            set: { isExpanded in
+                if isExpanded { collapsed.remove(id) } else { collapsed.insert(id) }
+            })
+    }
+
+    private func meetingRow(_ meeting: MeetingSummaryRow) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(meeting.title).fontWeight(.medium)
+            HStack(spacing: 6) {
+                Text(meeting.date)
+                if !meeting.attendees.isEmpty {
+                    Text(meeting.attendees.joined(separator: ", "))
+                        .lineLimit(1)
+                }
+                StatusLabel(meeting: meeting)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
     }
 }
 

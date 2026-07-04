@@ -49,7 +49,8 @@ public enum RuntimeLocation {
 /// 14: pasted-image text is OCR'd at paste time and reaches chat and search.
 /// 15: a folder-scoped library search that finds nothing widens to the vault.
 /// 16: refiling a meeting moves its chunks in the search index too.
-public let runtimeVersion = "16"
+/// 17: the model's Sources trailer is always stripped from library answers.
+public let runtimeVersion = "17"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.
