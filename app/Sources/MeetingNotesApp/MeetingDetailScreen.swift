@@ -181,6 +181,7 @@ struct MeetingDetailScreen: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .help("More actions: reveal in Finder, regenerate summary, delete")
             }
             if detail.processing_status == "failed" {
                 Text(detail.last_error ?? "Processing failed.")

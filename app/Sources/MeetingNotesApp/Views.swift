@@ -123,7 +123,14 @@ struct MainSplit: View {
             }
         }
         .animation(.easeInOut(duration: 0.15), value: showLibraryChat)
+        .navigationTitle("Polenta Meeting Notes")
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 18, height: 18)
+            }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Ask the library") { showLibraryChat.toggle() }
                 RecordToolbarButton(capture: model.capture)
@@ -135,6 +142,9 @@ struct MainSplit: View {
 struct RecordToolbarButton: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject var capture: CaptureController
+    @AppStorage(RecordShortcut.key) private var shortcutKey = RecordShortcut.defaultKey
+
+    private var shortcut: KeyEquivalent { KeyEquivalent(shortcutKey.first ?? "r") }
 
     var body: some View {
         if capture.isCapturing {
@@ -145,6 +155,8 @@ struct RecordToolbarButton: View {
                     .labelStyle(.titleAndIcon)
             }
             .buttonStyle(PillButtonStyle(background: .red, foreground: .white))
+            .keyboardShortcut(shortcut, modifiers: .command)
+            .help("Stop recording (\u{2318}\(shortcutKey.uppercased()))")
         } else {
             Button {
                 model.startRecording(microphone: model.microphones.selection)
@@ -153,9 +165,15 @@ struct RecordToolbarButton: View {
                     .labelStyle(.titleAndIcon)
             }
             .buttonStyle(PillButtonStyle(background: Color(white: 0.96), foreground: .black))
-            .keyboardShortcut("r")
+            .keyboardShortcut(shortcut, modifiers: .command)
+            .help("Start recording (\u{2318}\(shortcutKey.uppercased()))")
         }
     }
+}
+
+enum RecordShortcut {
+    static let key = "recordShortcutKey"
+    static let defaultKey = "r"
 }
 
 /// A text input with a fill slightly lighter than its surround and a soft
@@ -200,6 +218,7 @@ struct SettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(Appearance.sizeKey) private var baseFontSize = Appearance.defaultSize
     @AppStorage(Appearance.designKey) private var fontDesign = "system"
+    @AppStorage(RecordShortcut.key) private var recordShortcutKey = RecordShortcut.defaultKey
     @State private var importStatus: String?
     @State private var importing = false
     @State private var promptRestored = false
@@ -219,6 +238,24 @@ struct SettingsSheet: View {
                     }
                     if let importStatus {
                         Text(importStatus).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Recording") {
+                    LabeledContent {
+                        HStack(spacing: 4) {
+                            Text("\u{2318}").foregroundStyle(.secondary)
+                            TextField("", text: $recordShortcutKey)
+                                .frame(width: 32)
+                                .multilineTextAlignment(.center)
+                                .onChange(of: recordShortcutKey) { _, value in
+                                    let cleaned = value.lowercased().filter { $0.isLetter || $0.isNumber }
+                                    recordShortcutKey = String(cleaned.prefix(1).isEmpty ? "r" : cleaned.prefix(1))
+                                }
+                        }
+                    } label: {
+                        Label("Start and stop recording", systemImage: "keyboard")
+                        Text("The shortcut that toggles recording, always with the Command key.")
                     }
                 }
 
@@ -365,33 +402,14 @@ struct SupervisorBanner: View {
     }
 }
 
-struct BrandHeader: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(nsImage: NSApp.applicationIconImage)
-                .resizable()
-                .frame(width: 22, height: 22)
-            Text("Polenta Meeting Notes")
-                .font(.headline)
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-    }
-}
-
 struct LibraryList: View {
     @EnvironmentObject var model: AppModel
     // Folders start expanded; a folder the user collapses is remembered here.
     @State private var collapsed: Set<String> = []
 
     var body: some View {
-        VStack(spacing: 0) {
-            BrandHeader()
-            Divider()
-            meetingList
-        }
-        .navigationSplitViewColumnWidth(min: 240, ideal: 300)
+        meetingList
+            .navigationSplitViewColumnWidth(min: 240, ideal: 300)
     }
 
     private var meetingList: some View {
