@@ -54,7 +54,8 @@ public enum RuntimeLocation {
 /// 19: import meetings from a Granola CSV export.
 /// 20: Granola-style bulleted summary prompt with a Decisions section; the
 ///     import reconciles every CSV row.
-public let runtimeVersion = "20"
+/// 21: endpoint to restore the bundled default summary prompt into a vault.
+public let runtimeVersion = "21"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.
