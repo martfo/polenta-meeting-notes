@@ -54,7 +54,13 @@ public enum StopOutcome: Equatable, Sendable {
     case enqueued(meetingID: String)
     /// The backend was unreachable; the audio is safe and the job is pending.
     case pendingBackend
+    /// The recording captured no audio, so no meeting was created.
+    case emptyRecording
 }
+
+/// The smallest WAV that carries any audio. A 16 kHz mono PCM header is 44
+/// bytes; anything at or below that captured nothing, so no meeting is made.
+public let minimumRecordingBytes = 44
 
 public final class RecordingCoordinator {
     public private(set) var isRecording = false
@@ -95,6 +101,13 @@ public final class RecordingCoordinator {
     public func stop(wavData: Data, title: String, source: MeetingSource) throws -> StopOutcome {
         precondition(isRecording, "not recording")
         isRecording = false
+
+        // A header-only or empty buffer captured nothing (a tap that never
+        // delivered, a permission quietly denied). Create no meeting rather
+        // than a 0-byte one that only fails processing.
+        guard wavData.count > minimumRecordingBytes else {
+            return .emptyRecording
+        }
 
         try FileManager.default.createDirectory(at: capturesDirectory, withIntermediateDirectories: true)
         let stamp = ISO8601DateFormatter().string(from: clock())

@@ -117,6 +117,7 @@ def main(config_path: str) -> None:
         conn=conn, vault=vault, config=config, worker=worker,
         lm_client=lm_client, gallery=gallery,
         vector_store=store, text_embedder=text_embedder,
+        ocr_engine=VisionOcr(),
     ))
     try:
         uvicorn.run(app, host="127.0.0.1", port=config.backend_port, log_config=None)

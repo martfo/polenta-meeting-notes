@@ -49,6 +49,15 @@ def index_meeting(
         return 0
     segments = load_segments(segments_path).segments
     chunks = chunk_segments(segments, asg.display_names(conn, meeting_id))
+
+    # Text recognised from pasted images is searchable too, attributed to a
+    # pseudo-speaker so a citation reads sensibly.
+    from meetingnotes.notes.ocr import read_ocr_texts
+    from meetingnotes.vectors.chunking import Chunk
+
+    for ocr_text in read_ocr_texts(vault, meeting_id):
+        chunks.append(Chunk(text=ocr_text, speaker="Pasted image", start_s=0.0, end_s=0.0))
+
     if not chunks:
         return 0
     vectors = embedder.embed_texts([c.text for c in chunks])

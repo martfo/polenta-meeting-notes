@@ -23,7 +23,9 @@ def purge_empty_recordings(conn: sqlite3.Connection, vault: Vault) -> list[str]:
         meeting_id = row["id"]
         audio = vault.audio_path(meeting_id)
         transcript = vault.transcript_path(meeting_id)
-        audio_empty = (not audio.exists()) or audio.stat().st_size == 0
+        # 44 bytes is a header with no samples; at or below that it captured
+        # nothing.
+        audio_empty = (not audio.exists()) or audio.stat().st_size <= 44
         if audio_empty and not transcript.exists():
             conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
             shutil.rmtree(vault.meeting_dir(meeting_id), ignore_errors=True)

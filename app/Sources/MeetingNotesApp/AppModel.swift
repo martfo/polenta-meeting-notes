@@ -149,6 +149,9 @@ final class AppModel: ObservableObject {
                 }
             case .pendingBackend:
                 lastRecordingMessage = "Saved. The backend is not running yet, so processing will start when it is."
+            case .emptyRecording:
+                lastRecordingMessage = "That recording captured no audio, so nothing was saved. "
+                    + "Check the microphone and system-audio permissions and the input levels."
             }
             pendingAttendees = []
         } catch {

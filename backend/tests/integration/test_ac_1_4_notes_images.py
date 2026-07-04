@@ -37,3 +37,24 @@ def test_ac_1_4_c_ocr_text_joins_context(conn, vault, fixtures_dir):
     assert OCR_EXPECTED in content
 
     assert ocr_texts_for_meeting(vault, meeting_id, VisionOcr(), enabled=False) == []
+
+
+def test_pasted_image_ocr_reaches_chat_and_index(conn, vault, fixtures_dir):
+    """Text recognised from a pasted image is cached in a sidecar and reaches
+    the single-meeting chat context and the search index."""
+    from meetingnotes.llm.chat import assemble_chat_messages
+    from meetingnotes.notes.ocr import VisionOcr, read_ocr_texts, store_image_ocr
+    from meetingnotes.notes.notes import linked_images
+
+    meeting_id = make_meeting(conn, vault)
+    paste_image(vault, meeting_id, (fixtures_dir / "images" / "ocr_sample.png").read_bytes())
+
+    # OCR at paste time writes the sidecar; read_ocr_texts needs no engine.
+    store_image_ocr(linked_images(vault, meeting_id)[0], VisionOcr())
+    cached = read_ocr_texts(vault, meeting_id)
+    assert any(OCR_EXPECTED in t for t in cached)
+
+    # Chat carries the image text in the system context.
+    messages = assemble_chat_messages("what was in the image?", "transcript", "", cached)
+    assert OCR_EXPECTED in messages[0]["content"]
+    assert "pasted image" in messages[0]["content"].lower()

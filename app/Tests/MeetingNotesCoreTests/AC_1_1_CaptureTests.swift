@@ -194,6 +194,21 @@ struct AC_1_1_CaptureTests {
         #expect(message.contains("Microphone") && message.contains("System audio"))
     }
 
+    @Test("an empty recording creates no meeting")
+    func test_empty_recording_makes_no_meeting() throws {
+        let backend = FakeBackend()
+        let coordinator = makeCoordinator(backend: backend)
+
+        coordinator.start()
+        // A header-only WAV (zero samples) captured nothing.
+        let empty = AudioMixer.wavData(samples: [])
+        let outcome = try coordinator.stop(wavData: empty, title: "Meeting", source: .online)
+
+        #expect(outcome == .emptyRecording)
+        #expect(backend.imported.isEmpty, "no meeting is created for empty audio")
+        #expect(coordinator.isRecording == false)
+    }
+
     @Test("AC-1.0-f backend down at capture: audio kept, job pending, enqueued later")
     func test_ac_1_0_f_backend_down_at_capture() throws {
         let backend = FakeBackend()

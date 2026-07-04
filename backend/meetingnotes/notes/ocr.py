@@ -37,18 +37,47 @@ class VisionOcr:
         return "\n".join(lines)
 
 
+def _sidecar(image_path: Path) -> Path:
+    """The stored OCR result beside an image, so text is recognised once at
+    paste time and then read cheaply by chat, the summary, and the index."""
+    return image_path.with_suffix(image_path.suffix + ".ocr.txt")
+
+
+def store_image_ocr(image_path: Path, engine: OcrEngine | None = None) -> str:
+    """OCR one image and cache the result in its sidecar. Returns the text."""
+    engine = engine or VisionOcr()
+    text = engine.extract_text(image_path).strip()
+    _sidecar(image_path).write_text(text)
+    return text
+
+
+def read_ocr_texts(vault: Vault, meeting_id: str) -> list[str]:
+    """Cached OCR text for the meeting's images, sidecars only, no model. This
+    is what chat and the index use, so they need no OCR engine of their own."""
+    texts = []
+    for image in linked_images(vault, meeting_id):
+        sidecar = _sidecar(image)
+        if sidecar.exists():
+            text = sidecar.read_text().strip()
+            if text:
+                texts.append(text)
+    return texts
+
+
 def ocr_texts_for_meeting(
     vault: Vault, meeting_id: str, engine: OcrEngine | None = None,
     enabled: bool = True,
 ) -> list[str]:
     """OCR text for each image linked from the meeting's notes, when the OCR
-    pass is enabled in config."""
+    pass is enabled in config. Uses the cached sidecar where present and
+    recognises and caches any image that has none."""
     if not enabled:
         return []
     engine = engine or VisionOcr()
     texts = []
     for image in linked_images(vault, meeting_id):
-        text = engine.extract_text(image).strip()
+        sidecar = _sidecar(image)
+        text = sidecar.read_text().strip() if sidecar.exists() else store_image_ocr(image, engine)
         if text:
             texts.append(text)
     return texts

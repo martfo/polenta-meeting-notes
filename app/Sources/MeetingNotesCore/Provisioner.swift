@@ -46,7 +46,8 @@ public enum RuntimeLocation {
 /// 12: meetings can be deleted, and call detection triggers on changes only.
 /// 13: empty recordings are rejected and old empty-recording meetings are
 ///     purged at startup.
-public let runtimeVersion = "13"
+/// 14: pasted-image text is OCR'd at paste time and reaches chat and search.
+public let runtimeVersion = "14"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

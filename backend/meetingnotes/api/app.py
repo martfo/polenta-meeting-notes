@@ -37,6 +37,7 @@ class AppState:
     gallery: Gallery
     vector_store: Any = None
     text_embedder: Any = None
+    ocr_engine: Any = None
 
 
 class ImportRequest(BaseModel):
@@ -179,9 +180,12 @@ def create_app(state: AppState) -> FastAPI:
         transcript_path = vault.transcript_path(meeting_id)
         if not transcript_path.exists():
             raise HTTPException(409, "this meeting has no transcript yet")
+        from meetingnotes.notes.ocr import read_ocr_texts
+
         answer = ask_meeting(
             state.lm_client, request.question,
             transcript_path.read_text(), read_notes(vault, meeting_id),
+            ocr_texts=read_ocr_texts(vault, meeting_id) if state.config.ocr_enabled else [],
             history=[{"question": t.question, "answer": t.answer} for t in request.history],
         )
         return {"answer": answer}
@@ -353,7 +357,28 @@ def create_app(state: AppState) -> FastAPI:
         relative = paste_image(
             vault, meeting_id, base64.b64decode(request.data_base64), request.suffix
         )
-        return {"path": relative, "summary_action": _summary_action_for_notes_change(meeting_id)}
+        # Recognise the image's text now, so chat, the summary, and the search
+        # index can all use it. Cached in a sidecar; failure never blocks the
+        # paste.
+        ocr_text = ""
+        if state.config.ocr_enabled and state.ocr_engine is not None:
+            try:
+                from meetingnotes.notes.ocr import store_image_ocr
+
+                ocr_text = store_image_ocr(
+                    vault.meeting_dir(meeting_id) / relative, state.ocr_engine)
+                if ocr_text:
+                    _reindex(meeting_id)  # make the recognised text searchable
+            except Exception:
+                import logging
+
+                logging.getLogger("meetingnotes").warning(
+                    "OCR of a pasted image failed", extra={"meeting_id": meeting_id})
+        return {
+            "path": relative,
+            "ocr_found": bool(ocr_text),
+            "summary_action": _summary_action_for_notes_change(meeting_id),
+        }
 
     @app.post("/meetings/{meeting_id}/regenerate-summary")
     def regenerate_summary(meeting_id: str) -> dict:
