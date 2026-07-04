@@ -129,7 +129,7 @@ final class AppModel: ObservableObject {
             do {
                 // Capture must come up before the coordinator is marked
                 // recording, so a tap failure leaves no meeting behind.
-                try capture.start(microphoneDeviceID: microphone?.id)
+                try await capture.start(microphoneDeviceID: microphone?.id)
                 coordinator.start()
                 lastRecordingMessage = nil
             } catch {
@@ -151,35 +151,34 @@ final class AppModel: ObservableObject {
 
     func stopRecording() {
         guard let coordinator else { return }
-        let (wavData, source) = capture.stop()
-        let title = pendingTitle ?? "Meeting"
-        pendingTitle = nil
-        do {
-            let outcome = try coordinator.stop(
-                wavData: wavData,
-                title: title,
-                source: source)
-            switch outcome {
-            case .enqueued(let meetingID):
-                lastRecordingMessage = "Saved and queued for processing. You can start the next meeting now."
-                if !pendingAttendees.isEmpty {
-                    let attendees = pendingAttendees
-                    Task {
+        Task {
+            let (wavData, source) = await capture.stop()
+            let title = pendingTitle ?? "Meeting"
+            pendingTitle = nil
+            do {
+                let outcome = try coordinator.stop(
+                    wavData: wavData,
+                    title: title,
+                    source: source)
+                switch outcome {
+                case .enqueued(let meetingID):
+                    lastRecordingMessage = "Saved and queued for processing. You can start the next meeting now."
+                    if !pendingAttendees.isEmpty {
+                        let attendees = pendingAttendees
                         try? await client.setAttendees(meetingID, attendees: attendees)
-                        await refreshLibrary()
                     }
+                case .pendingBackend:
+                    lastRecordingMessage = "Saved. The backend is not running yet, so processing will start when it is."
+                case .emptyRecording:
+                    lastRecordingMessage = "That recording captured no audio, so nothing was saved. "
+                        + "Check the microphone and system-audio permissions and the input levels."
                 }
-            case .pendingBackend:
-                lastRecordingMessage = "Saved. The backend is not running yet, so processing will start when it is."
-            case .emptyRecording:
-                lastRecordingMessage = "That recording captured no audio, so nothing was saved. "
-                    + "Check the microphone and system-audio permissions and the input levels."
+                pendingAttendees = []
+            } catch {
+                lastRecordingMessage = "The recording could not be saved: \(error.localizedDescription)"
             }
-            pendingAttendees = []
-        } catch {
-            lastRecordingMessage = "The recording could not be saved: \(error.localizedDescription)"
+            await refreshLibrary()
         }
-        Task { await refreshLibrary() }
     }
 
     // MARK: - Shortcuts into the vault

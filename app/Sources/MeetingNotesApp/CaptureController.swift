@@ -14,15 +14,20 @@ final class CaptureController: ObservableObject {
     @Published var systemLevel: Float = 0
     @Published private(set) var isCapturing = false
 
-    private let tap = SystemAudioTap()
-    private let engine = AVAudioEngine()
-    private let classifier = SourceClassifier()
+    // The audio machinery is driven off the main thread (see start/stop), so
+    // that Core Audio setup, which can block while the tap and aggregate
+    // device are created, never freezes the UI. Access is serialised by
+    // ioQueue and accumulationQueue.
+    nonisolated(unsafe) private let tap = SystemAudioTap()
+    nonisolated(unsafe) private let engine = AVAudioEngine()
+    nonisolated(unsafe) private let classifier = SourceClassifier()
 
     // Streams are resampled to 16 kHz as they arrive and accumulated as
     // floats, so an hour of audio stays modest in memory.
-    private var microphoneSamples: [Float] = []
-    private var systemSamples: [Float] = []
+    nonisolated(unsafe) private var microphoneSamples: [Float] = []
+    nonisolated(unsafe) private var systemSamples: [Float] = []
     private let accumulationQueue = DispatchQueue(label: "capture.accumulate")
+    private let ioQueue = DispatchQueue(label: "capture.io")
 
     static func requestMicrophoneAccess() async -> Bool {
         await AVCaptureDevice.requestAccess(for: .audio)
@@ -36,9 +41,27 @@ final class CaptureController: ObservableObject {
         }
     }
 
-    func start(microphoneDeviceID: AudioDeviceID?) throws {
-        microphoneSamples = []
-        systemSamples = []
+    /// Starts capture off the main thread, so blocking Core Audio setup never
+    /// beachballs the UI. `isCapturing` flips on the main actor once ready.
+    func start(microphoneDeviceID: AudioDeviceID?) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            ioQueue.async {
+                do {
+                    try self.performStart(microphoneDeviceID: microphoneDeviceID)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+        isCapturing = true
+    }
+
+    nonisolated private func performStart(microphoneDeviceID: AudioDeviceID?) throws {
+        accumulationQueue.sync {
+            microphoneSamples = []
+            systemSamples = []
+        }
 
         try tap.start()
         let tapRate = tap.sampleRate
@@ -71,18 +94,27 @@ final class CaptureController: ObservableObject {
         }
         engine.prepare()
         try engine.start()
-        isCapturing = true
     }
 
-    /// Stops capture and returns the mixed WAV plus the detected source.
-    func stop() -> (wavData: Data, source: MeetingSource) {
+    /// Stops capture off the main thread and returns the mixed WAV plus the
+    /// detected source.
+    func stop() async -> (wavData: Data, source: MeetingSource) {
+        let result = await withCheckedContinuation { (continuation: CheckedContinuation<(Data, MeetingSource), Never>) in
+            ioQueue.async {
+                continuation.resume(returning: self.performStop())
+            }
+        }
+        isCapturing = false
+        microphoneLevel = 0
+        systemLevel = 0
+        return result
+    }
+
+    nonisolated private func performStop() -> (wavData: Data, source: MeetingSource) {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         tap.onBuffer = nil
         tap.stop()
-        isCapturing = false
-        microphoneLevel = 0
-        systemLevel = 0
 
         let (mic, system, source) = accumulationQueue.sync {
             (microphoneSamples, systemSamples, classifier.source)
@@ -93,7 +125,7 @@ final class CaptureController: ObservableObject {
         return (AudioMixer.wavData(samples: mixed), source)
     }
 
-    private func selectInput(device: AudioDeviceID) throws {
+    nonisolated private func selectInput(device: AudioDeviceID) throws {
         guard let unit = engine.inputNode.audioUnit else { return }
         var deviceID = device
         let status = AudioUnitSetProperty(

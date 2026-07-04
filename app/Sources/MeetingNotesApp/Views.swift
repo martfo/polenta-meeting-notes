@@ -132,8 +132,10 @@ struct MainSplit: View {
             ToolbarItem(placement: .navigation) {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
-                    .scaledToFit()
-                    .frame(width: 18, height: 18)
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 22, height: 22)
+                    .padding(.trailing, 2)
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Ask the library") { showLibraryChat.toggle() }
@@ -215,9 +217,6 @@ struct SettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(Appearance.sizeKey) private var baseFontSize = Appearance.defaultSize
     @AppStorage(Appearance.designKey) private var fontDesign = "system"
-    @AppStorage(RecordShortcut.key) private var recordShortcutKey = RecordShortcut.defaultKey
-    @AppStorage(RecordShortcut.modifiersKey) private var modifierRaw = RecordShortcut.defaultModifiers.rawValue
-    @State private var shortcutRegistered = true
     @State private var importStatus: String?
     @State private var importing = false
     @State private var promptRestored = false
@@ -240,40 +239,7 @@ struct SettingsSheet: View {
                     }
                 }
 
-                Section("Recording shortcut") {
-                    Text("A system-wide shortcut that starts and stops recording even "
-                         + "when another app, such as your call, has focus.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    HStack(spacing: 12) {
-                        Toggle("\u{2303} Control", isOn: modifier(.control))
-                        Toggle("\u{2325} Option", isOn: modifier(.option))
-                        Toggle("\u{21E7} Shift", isOn: modifier(.shift))
-                        Toggle("\u{2318} Command", isOn: modifier(.command))
-                    }
-                    .toggleStyle(.checkbox)
-                    HStack {
-                        Text("Key")
-                        TextField("", text: $recordShortcutKey)
-                            .frame(width: 40)
-                            .multilineTextAlignment(.center)
-                            .onChange(of: recordShortcutKey) { _, value in
-                                let cleaned = value.lowercased().filter { $0.isLetter || $0.isNumber }
-                                recordShortcutKey = cleaned.isEmpty ? "r" : String(cleaned.prefix(1))
-                                applyShortcut()
-                            }
-                        Spacer()
-                        Text(RecordShortcut.displayString())
-                            .font(.title3.monospaced())
-                            .foregroundStyle(.primary)
-                    }
-                    if !shortcutRegistered {
-                        Label("This combination could not be registered. It may need at "
-                              + "least one modifier, or another app may already use it.",
-                              systemImage: "exclamationmark.triangle")
-                            .font(.caption).foregroundStyle(.orange)
-                    }
-                }
-                .onChange(of: modifierRaw) { _, _ in applyShortcut() }
+                RecordingShortcutSection()
 
                 Section("Appearance") {
                     Picker("Font", selection: $fontDesign) {
@@ -330,20 +296,6 @@ struct SettingsSheet: View {
         .frame(width: 480, height: 520)
     }
 
-    private func modifier(_ mod: ShortcutModifiers) -> Binding<Bool> {
-        Binding(
-            get: { ShortcutModifiers(rawValue: modifierRaw).contains(mod) },
-            set: { on in
-                var set = ShortcutModifiers(rawValue: modifierRaw)
-                if on { set.insert(mod) } else { set.remove(mod) }
-                modifierRaw = set.rawValue
-            })
-    }
-
-    private func applyShortcut() {
-        shortcutRegistered = GlobalHotKey.shared.applyFromDefaults()
-    }
-
     private func restorePrompt() {
         Task {
             try? await model.client.restoreDefaultSummaryPrompt()
@@ -390,6 +342,69 @@ struct SettingsSheet: View {
                 importStatus = "Import failed: \(error.localizedDescription)"
             }
         }
+    }
+}
+
+struct RecordingShortcutSection: View {
+    @AppStorage(RecordShortcut.key) private var recordShortcutKey = RecordShortcut.defaultKey
+    @AppStorage(RecordShortcut.modifiersKey) private var modifierRaw = RecordShortcut.defaultModifiers.rawValue
+    @State private var registered = true
+
+    private let keyChoices: [String] =
+        (UnicodeScalar("a").value...UnicodeScalar("z").value).compactMap { UnicodeScalar($0).map(String.init) }
+        + (0...9).map(String.init)
+
+    var body: some View {
+        Section("Recording shortcut") {
+            Text("A system-wide shortcut that starts and stops recording even when "
+                 + "another app, such as your call, has focus. Changes are saved and "
+                 + "take effect immediately.")
+                .font(.caption).foregroundStyle(.secondary)
+            modifiers
+            Picker("Key", selection: $recordShortcutKey) {
+                ForEach(keyChoices, id: \.self) { Text($0.uppercased()).tag($0) }
+            }
+            .frame(maxWidth: 160)
+            LabeledContent("Shortcut") {
+                Text(RecordShortcut.displayString())
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(registered ? Color.primary : Color.orange)
+            }
+            if !registered {
+                Label("This combination could not be registered. It needs at least one "
+                      + "modifier, or another app may already use it.",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+        }
+        .onChange(of: recordShortcutKey) { _, _ in apply() }
+        .onChange(of: modifierRaw) { _, _ in apply() }
+        .onAppear { registered = GlobalHotKey.shared.applyFromDefaults() }
+    }
+
+    private var modifiers: some View {
+        HStack(spacing: 14) {
+            Text("Modifiers").foregroundStyle(.secondary)
+            Toggle("\u{2303}", isOn: modifier(.control)).help("Control")
+            Toggle("\u{2325}", isOn: modifier(.option)).help("Option")
+            Toggle("\u{21E7}", isOn: modifier(.shift)).help("Shift")
+            Toggle("\u{2318}", isOn: modifier(.command)).help("Command")
+        }
+        .toggleStyle(.checkbox)
+    }
+
+    private func modifier(_ mod: ShortcutModifiers) -> Binding<Bool> {
+        Binding(
+            get: { ShortcutModifiers(rawValue: modifierRaw).contains(mod) },
+            set: { on in
+                var set = ShortcutModifiers(rawValue: modifierRaw)
+                if on { set.insert(mod) } else { set.remove(mod) }
+                modifierRaw = set.rawValue
+            })
+    }
+
+    private func apply() {
+        registered = GlobalHotKey.shared.applyFromDefaults()
     }
 }
 
