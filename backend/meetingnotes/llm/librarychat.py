@@ -24,11 +24,23 @@ class ChatScope(str, Enum):
 DEFAULT_SCOPE = ChatScope.FOLDER
 
 SYSTEM_PROMPT = (
-    "You answer questions across a library of meeting transcripts, using only "
-    "the excerpts provided. Each excerpt names its meeting and speaker. Answer "
-    "plainly in British English. If the excerpts do not contain the answer, "
-    "say so. End your reply with a single line in exactly this form, naming "
-    "only the meetings your answer actually drew on:\n"
+    "You answer questions across a library of meeting transcripts using only "
+    "the excerpts provided. The excerpts are the passages retrieved as most "
+    "relevant to the question; they are not the whole meetings, so they may be "
+    "incomplete.\n\n"
+    "Follow these rules:\n"
+    "- Base your answer only on the excerpts. Do not use outside knowledge.\n"
+    "- Each excerpt names its meeting and speaker; attribute statements to the "
+    "right person.\n"
+    "- Never state that something was not said or did not happen. The excerpts "
+    "are only a partial view, so absence from them does not mean absence from "
+    "the meeting. If the excerpts do not contain the answer, say you could not "
+    "find it in the retrieved excerpts and suggest rewording the question.\n"
+    "- Do not guess or fill gaps; if you are unsure, say what the excerpts do "
+    "and do not show.\n"
+    "- Answer plainly in British English.\n\n"
+    "End your reply with a single line in exactly this form, naming only the "
+    "meetings your answer actually drew on:\n"
     "Sources: <meeting id>, <meeting id>"
 )
 
@@ -69,7 +81,7 @@ class LibraryAnswer:
 
 def retrieve(
     store: VectorStore, embedder: TextEmbedder, question: str,
-    scope: ChatScope = DEFAULT_SCOPE, folder_id: int | None = None, limit: int = 8,
+    scope: ChatScope = DEFAULT_SCOPE, folder_id: int | None = None, limit: int = 16,
 ) -> list[dict]:
     """Chunks within the chosen scope only. Folder scope requires the folder."""
     if scope is ChatScope.FOLDER and folder_id is None:

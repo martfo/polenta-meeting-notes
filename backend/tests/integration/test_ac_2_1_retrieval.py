@@ -153,6 +153,20 @@ def test_ac_2_1_e_citations_match_chunks(conn, vault, store, embedder, fixtures_
     assert set(result.citations) == {a, b}
 
 
+def test_library_prompt_forbids_asserting_negatives():
+    """The library prompt tells the model the excerpts are partial and never
+    to claim something did not happen, so a retrieval miss cannot become a
+    confident false negative."""
+    from meetingnotes.llm.librarychat import assemble_library_messages
+
+    system = assemble_library_messages("q", [
+        {"meeting_id": "m1", "speaker": "Martin", "start_s": 0, "chunk_text": "text"},
+    ])[0]["content"].lower()
+    assert "partial" in system or "incomplete" in system
+    assert "did not happen" in system or "not said" in system
+    assert "could not find" in system
+
+
 def test_refiling_moves_chunks_in_index(conn, vault, store, embedder):
     """Moving a meeting to another folder updates the folder stored on its
     search chunks, so folder-scoped retrieval follows the move."""
