@@ -21,6 +21,20 @@ private enum Block: Identifiable {
     }
 }
 
+/// The text of a bullet if the line is one, for the marker styles a model
+/// might emit: -, *, •, or a number followed by a dot or paren.
+private func bulletBody(of line: String) -> String? {
+    for marker in ["- ", "* ", "• ", "•\t"] {
+        if line.hasPrefix(marker) {
+            return String(line.dropFirst(marker.count)).trimmingCharacters(in: .whitespaces)
+        }
+    }
+    if let match = line.range(of: #"^\d{1,2}[.)]\s+"#, options: .regularExpression) {
+        return String(line[match.upperBound...])
+    }
+    return nil
+}
+
 private func parseBlocks(_ text: String) -> [Block] {
     var blocks: [Block] = []
     var paragraph: [String] = []
@@ -46,9 +60,9 @@ private func parseBlocks(_ text: String) -> [Block] {
         } else if line.hasPrefix("### ") {
             flushParagraph()
             blocks.append(.subheading(String(line.dropFirst(4))))
-        } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
+        } else if let bulletBody = bulletBody(of: line) {
             flushParagraph()
-            blocks.append(.bullet(text: String(line.dropFirst(2)), indent: leading / 2))
+            blocks.append(.bullet(text: bulletBody, indent: leading / 2))
         } else if line.hasPrefix("**") && line.hasSuffix("**") && line.count > 4
                     && !line.dropFirst(2).dropLast(2).contains("**") {
             // A line that is entirely bold reads as a sub-heading.

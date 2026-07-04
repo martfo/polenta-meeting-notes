@@ -294,6 +294,15 @@ def create_app(state: AppState) -> FastAPI:
         _refresh_for(assignment_id, old_name)
         return {"assigned": True}
 
+    @app.post("/settings/restore-summary-prompt")
+    def restore_summary_prompt() -> dict:
+        """Overwrite the vault's summary prompt with the current bundled
+        default (the Granola-style one). Used when a vault carries an older
+        prompt that predates a default change."""
+        default = Path(__file__).resolve().parents[1] / "resources" / "summary_prompt.md"
+        vault.summary_prompt_path.write_text(default.read_text())
+        return {"restored": True}
+
     @app.put("/meetings/{meeting_id}/summary")
     def edit_summary(meeting_id: str, request: SummaryRequest) -> dict:
         """The user's edited summary body, written under fresh front matter.

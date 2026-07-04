@@ -164,6 +164,7 @@ struct SettingsSheet: View {
     @AppStorage(Appearance.designKey) private var fontDesign = "system"
     @State private var importStatus: String?
     @State private var importing = false
+    @State private var promptRestored = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -208,6 +209,14 @@ struct SettingsSheet: View {
                         Label("Summary prompt", systemImage: "square.and.pencil")
                         Text("Changes take effect on the next summary, no restart.")
                     }
+                    LabeledContent {
+                        Button(promptRestored ? "Restored" : "Restore") { restorePrompt() }
+                            .disabled(promptRestored)
+                    } label: {
+                        Label("Granola-style default", systemImage: "sparkles")
+                        Text("Replace this vault's summary prompt with the latest "
+                             + "bullet-point default, then use Regenerate on a meeting.")
+                    }
                 }
 
                 Section("Troubleshooting") {
@@ -228,6 +237,13 @@ struct SettingsSheet: View {
             .padding(12)
         }
         .frame(width: 480, height: 520)
+    }
+
+    private func restorePrompt() {
+        Task {
+            try? await model.client.restoreDefaultSummaryPrompt()
+            promptRestored = true
+        }
     }
 
     private func chooseGranolaCSV() {

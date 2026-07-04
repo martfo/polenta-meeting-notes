@@ -101,6 +101,10 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         let _: [String: AnyDecodable] = try await put("/meetings/\(id)/summary", body: ["body": body])
     }
 
+    func restoreDefaultSummaryPrompt() async throws {
+        let _: [String: AnyDecodable] = try await post("/settings/restore-summary-prompt", body: nil)
+    }
+
     /// Returns the backend's summary decision: none, regenerating, or prompt
     /// (the summary is hand-edited, so ask before replacing it).
     @discardableResult
