@@ -141,10 +141,10 @@ struct RecordToolbarButton: View {
             Button {
                 model.stopRecording()
             } label: {
-                Label("Stop recording", systemImage: "stop.circle.fill")
+                Label("Stop recording", systemImage: "stop.fill")
                     .labelStyle(.titleAndIcon)
             }
-            .tint(.red)
+            .buttonStyle(PillButtonStyle(background: .red, foreground: .white))
         } else {
             Button {
                 model.startRecording(microphone: model.microphones.selection)
@@ -152,8 +152,27 @@ struct RecordToolbarButton: View {
                 Label("Start recording", systemImage: "record.circle")
                     .labelStyle(.titleAndIcon)
             }
+            .buttonStyle(PillButtonStyle(background: Color(white: 0.96), foreground: .black))
             .keyboardShortcut("r")
         }
+    }
+}
+
+/// A rounded, filled pill: a light background with dark text stands out in the
+/// toolbar, as the record control should.
+struct PillButtonStyle: ButtonStyle {
+    var background: Color
+    var foreground: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(background.opacity(configuration.isPressed ? 0.8 : 1.0))
+            .clipShape(Capsule())
+            .contentShape(Capsule())
     }
 }
 
