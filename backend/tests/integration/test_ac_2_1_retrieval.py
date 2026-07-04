@@ -143,3 +143,20 @@ def test_ac_2_1_e_citations_match_chunks(conn, vault, store, embedder, fixtures_
     result = ask_library(lying, store, embedder, "what about the sensors",
                          scope=ChatScope.FOLDER, folder_id=clients)
     assert set(result.citations) == {a, b}
+
+
+def test_folder_scope_widens_when_empty(conn, vault, store, embedder, fixtures_dir):
+    """A folder-scoped question with no match in that folder searches the
+    whole vault rather than dead-ending, and says so."""
+    clients = f.create_folder(conn, "Clients")
+    empty_folder = f.create_folder(conn, "Empty")
+    a = seed_meeting(conn, vault, "2026-07-01_1000_a", "Sensors call", clients,
+                     [("Adiyah", "The hydroponics sensors were delivered.")])
+    index_meeting(conn, vault, store, embedder, a)
+
+    client = FakeLMClient(f"Adiyah discussed the sensors.\n\nSources: {a}")
+    result = ask_library(client, store, embedder, "what about hydroponics",
+                         scope=ChatScope.FOLDER, folder_id=empty_folder)
+
+    assert result.citations == [a], "found in another folder"
+    assert "searched every folder" in result.answer

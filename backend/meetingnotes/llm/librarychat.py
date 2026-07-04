@@ -92,9 +92,22 @@ def ask_library(
     allowlist: set[str] | None = None,
 ) -> LibraryAnswer:
     chunks = retrieve(store, embedder, question, scope, folder_id)
+
+    # A folder-scoped search that finds nothing widens to the whole vault
+    # rather than dead-ending, and the answer says it looked more broadly.
+    widened = False
+    if not chunks and scope is ChatScope.FOLDER:
+        chunks = retrieve(store, embedder, question, ChatScope.ALL)
+        widened = True
+
     if not chunks:
-        return LibraryAnswer(answer="Nothing in this scope matches the question.", citations=[])
+        return LibraryAnswer(
+            answer="Nothing in your meetings matches that question yet.", citations=[])
+
     answer = client.chat(assemble_library_messages(question, chunks))
     retrieved_ids = list(dict.fromkeys(c["meeting_id"] for c in chunks))
     answer, citations = extract_citations(british_pass(answer, allowlist).text, retrieved_ids)
+    if widened:
+        answer = ("Nothing matched in the selected folder, so I searched every "
+                  "folder:\n\n") + answer
     return LibraryAnswer(answer=answer, citations=citations)
