@@ -4,6 +4,7 @@
 
 import MeetingNotesCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 @main
 struct MeetingNotesApp: App {
@@ -161,10 +162,27 @@ struct SettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(Appearance.sizeKey) private var baseFontSize = Appearance.defaultSize
     @AppStorage(Appearance.designKey) private var fontDesign = "system"
+    @State private var importStatus: String?
+    @State private var importing = false
 
     var body: some View {
         VStack(spacing: 0) {
             Form {
+                Section("Import") {
+                    LabeledContent {
+                        Button(importing ? "Importing…" : "Choose CSV…") { chooseGranolaCSV() }
+                            .disabled(importing)
+                    } label: {
+                        Label("Import from Granola", systemImage: "square.and.arrow.down")
+                        Text("Import the CSV export from Granola (Settings, Profile, "
+                             + "Generate CSV). Meetings come in with their transcript, "
+                             + "summary, and folder, ready to search and chat.")
+                    }
+                    if let importStatus {
+                        Text(importStatus).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
                 Section("Appearance") {
                     Picker("Font", selection: $fontDesign) {
                         ForEach(Appearance.designs, id: \.raw) { design in
@@ -209,7 +227,38 @@ struct SettingsSheet: View {
             }
             .padding(12)
         }
-        .frame(width: 480, height: 430)
+        .frame(width: 480, height: 520)
+    }
+
+    private func chooseGranolaCSV() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.prompt = "Import"
+        guard panel.runModal() == .OK, let url = panel.url,
+              let csv = try? String(contentsOf: url, encoding: .utf8) else { return }
+        importing = true
+        importStatus = "Importing…"
+        Task {
+            defer { importing = false }
+            do {
+                let result = try await model.client.importGranolaCSV(csv)
+                await model.refreshLibrary()
+                if result.imported == 0 && !result.warnings.isEmpty {
+                    importStatus = result.warnings.joined(separator: " ")
+                } else {
+                    var parts = ["Imported \(result.imported) meeting(s)."]
+                    if result.skipped > 0 { parts.append("\(result.skipped) already present.") }
+                    if !result.folders_created.isEmpty {
+                        parts.append("New folders: \(result.folders_created.joined(separator: ", ")).")
+                    }
+                    importStatus = parts.joined(separator: " ")
+                }
+            } catch {
+                importStatus = "Import failed: \(error.localizedDescription)"
+            }
+        }
     }
 }
 

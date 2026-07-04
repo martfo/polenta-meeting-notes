@@ -164,6 +164,20 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         let _: [String: AnyDecodable] = try await put("/meetings/\(id)/title", body: ["name": title])
     }
 
+    struct GranolaImportResult: Codable {
+        let imported: Int
+        let skipped: Int
+        let folders_created: [String]
+        let mapped_columns: [String: String]
+        let unmapped_columns: [String]
+        let warnings: [String]
+    }
+
+    func importGranolaCSV(_ csvText: String) async throws -> GranolaImportResult {
+        struct Payload: Encodable { let csv_text: String }
+        return try await send("POST", "/import/granola", encodable: Payload(csv_text: csvText))
+    }
+
     func meetingSpeakers(_ id: String) async throws -> [SpeakerAssignment] {
         try await get("/meetings/\(id)/speakers")
     }

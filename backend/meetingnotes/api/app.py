@@ -61,6 +61,10 @@ class SummaryRequest(BaseModel):
     body: str
 
 
+class GranolaImportRequest(BaseModel):
+    csv_text: str
+
+
 class FolderRequest(BaseModel):
     name: str
 
@@ -399,6 +403,28 @@ def create_app(state: AppState) -> FastAPI:
         conn.commit()
         _enqueue_summarise(meeting_id)
         return {"regenerating": True}
+
+    @app.post("/import/granola")
+    def import_granola(request: GranolaImportRequest) -> dict:
+        """Import a Granola CSV export. New meetings are added to the search
+        index where the embedder is available."""
+        from meetingnotes.tools.granola_import import import_granola_csv
+        from meetingnotes.vectors.indexer import index_meeting
+
+        indexer = None
+        if state.vector_store is not None and state.text_embedder is not None:
+            def indexer(meeting_id: str) -> None:  # noqa: F811
+                index_meeting(conn, vault, state.vector_store, state.text_embedder, meeting_id)
+
+        report = import_granola_csv(conn, vault, request.csv_text, indexer=indexer)
+        return {
+            "imported": report.imported,
+            "skipped": report.skipped,
+            "folders_created": report.folders_created,
+            "mapped_columns": report.mapped_columns,
+            "unmapped_columns": report.unmapped_columns,
+            "warnings": report.warnings,
+        }
 
     @app.post("/library/chat")
     def library_chat(request: LibraryChatRequest) -> dict:

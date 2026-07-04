@@ -51,7 +51,8 @@ public enum RuntimeLocation {
 /// 16: refiling a meeting moves its chunks in the search index too.
 /// 17: the model's Sources trailer is always stripped from library answers.
 /// 18: library chat prompt hardened against false negatives; wider retrieval.
-public let runtimeVersion = "18"
+/// 19: import meetings from a Granola CSV export.
+public let runtimeVersion = "19"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.
