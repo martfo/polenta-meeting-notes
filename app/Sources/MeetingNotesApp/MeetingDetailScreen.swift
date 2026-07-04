@@ -27,6 +27,7 @@ struct MeetingDetailScreen: View {
     @State private var chatQuestion = ""
     @State private var chatBusy = false
     @State private var chatDrawerOpen = false
+    @State private var editingSummary = false
     @AppStorage(Appearance.sizeKey) private var baseFontSize = Appearance.defaultSize
     @AppStorage(Appearance.designKey) private var fontDesign = "system"
     @State private var pasteMonitor: Any?
@@ -195,7 +196,11 @@ struct MeetingDetailScreen: View {
     private func content(_ detail: MeetingDetail) -> some View {
         switch tab {
         case "Transcript":
-            MarkdownPane(text: detail.transcript ?? "No transcript yet. It appears when processing reaches that stage.")
+            if let transcript = detail.transcript {
+                ScrollView { RichMarkdownView(text: transcript).padding() }
+            } else {
+                MarkdownPane(text: "No transcript yet. It appears when processing reaches that stage.")
+            }
         case "Notes":
             VStack(alignment: .leading) {
                 TextEditor(text: $notesDraft)
@@ -254,20 +259,40 @@ struct MeetingDetailScreen: View {
             MarkdownPane(text: detail.summary_status == "pending"
                 ? "The summary is pending. It is written when LM Studio is reachable with a model loaded."
                 : "No summary yet.")
-        } else {
+        } else if editingSummary {
             VStack(alignment: .leading) {
+                HStack {
+                    Text("Editing summary").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Done") {
+                        saveSummary()
+                        editingSummary = false
+                    }
+                }
                 TextEditor(text: $summaryDraft)
                     .font(contentFont)
                     .focused($summaryFocused)
-                    .onChange(of: summaryFocused) { _, focused in
-                        if !focused { saveSummary() }
-                    }
-                Text("Your edits save on their own and are kept when speakers are "
-                     + "renamed. Retry regenerates the summary from scratch.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             .padding()
-            .onDisappear { saveSummary() }
+            .onDisappear {
+                saveSummary()
+                editingSummary = false
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Spacer()
+                    Button {
+                        summaryFocused = true
+                        editingSummary = true
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                    }
+                    .buttonStyle(.borderless)
+                }
+                ScrollView { RichMarkdownView(text: summaryDraft).padding(.bottom) }
+            }
+            .padding()
         }
     }
 
