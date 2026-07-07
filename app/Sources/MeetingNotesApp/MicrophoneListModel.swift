@@ -64,12 +64,15 @@ final class MicrophoneListModel: ObservableObject {
     }
 
     func refresh() {
-        devices = InputDevice.all()
+        // The system-default entry is always first, so a fresh install
+        // follows the Mac's input, and AirPods are used the moment they
+        // become the default.
+        devices = InputDevice.allWithDefault()
         let uid = MicrophoneSelection.choose(
             available: devices.map(\.uid),
             saved: preference.restore(),
             current: selection?.uid)
-        let chosen = devices.first { $0.uid == uid }
+        let chosen = devices.first { $0.uid == uid } ?? InputDevice.systemDefault
         if chosen != selection {
             selection = chosen
         }

@@ -79,6 +79,10 @@ final class CaptureController: ObservableObject {
         if let microphoneDeviceID {
             try selectInput(device: microphoneDeviceID)
         }
+        try installMicTapAndStart()
+    }
+
+    nonisolated private func installMicTapAndStart() throws {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         let inputRate = format.sampleRate
@@ -94,6 +98,43 @@ final class CaptureController: ObservableObject {
         }
         engine.prepare()
         try engine.start()
+    }
+
+    /// Switch the microphone mid-recording without stopping. System audio is
+    /// unaffected; the microphone has a brief gap while the engine restarts.
+    /// nil follows the system default input.
+    func switchInput(to deviceID: AudioDeviceID?) async {
+        guard isCapturing else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            ioQueue.async {
+                self.performSwitchInput(to: deviceID)
+                continuation.resume()
+            }
+        }
+    }
+
+    nonisolated private func performSwitchInput(to deviceID: AudioDeviceID?) {
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        do {
+            try selectInput(device: deviceID ?? Self.defaultInputDevice())
+            try installMicTapAndStart()
+        } catch {
+            // Leave the microphone off rather than crash; system audio and the
+            // recording continue.
+        }
+    }
+
+    nonisolated private static func defaultInputDevice() -> AudioDeviceID {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var deviceID = AudioDeviceID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        _ = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID)
+        return deviceID
     }
 
     /// Stops capture off the main thread and returns the mixed WAV plus the
@@ -141,6 +182,26 @@ struct InputDevice: Identifiable, Hashable {
     let id: AudioDeviceID
     let uid: String
     let name: String
+
+    static let systemDefaultUID = "system-default"
+
+    /// Follows whatever the Mac's default input is, so AirPods are used
+    /// automatically once they are the system default.
+    static let systemDefault = InputDevice(
+        id: AudioDeviceID(kAudioObjectUnknown),
+        uid: systemDefaultUID,
+        name: "System default (follows the Mac)")
+
+    /// The device id to hand to capture, or nil to let the engine follow the
+    /// system default.
+    var captureDeviceID: AudioDeviceID? {
+        uid == InputDevice.systemDefaultUID ? nil : id
+    }
+
+    /// The system-default entry first, then the specific devices.
+    static func allWithDefault() -> [InputDevice] {
+        [systemDefault] + all()
+    }
 
     static func all() -> [InputDevice] {
         var address = AudioObjectPropertyAddress(

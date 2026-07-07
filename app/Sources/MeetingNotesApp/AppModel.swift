@@ -142,7 +142,7 @@ final class AppModel: ObservableObject {
             do {
                 // Capture must come up before the coordinator is marked
                 // recording, so a tap failure leaves no meeting behind.
-                try await capture.start(microphoneDeviceID: microphone?.id)
+                try await capture.start(microphoneDeviceID: microphone.flatMap(\.captureDeviceID))
                 coordinator.start()
                 scheduleAutoStop(meetingEnd: autoStopEnd)
                 pendingAutoStopEnd = nil

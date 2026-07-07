@@ -566,13 +566,18 @@ struct RecordingBar: View {
                     .foregroundStyle(.red)
                 LevelBar(label: "Microphone", level: capture.microphoneLevel)
                 LevelBar(label: "System audio", level: capture.systemLevel)
-            } else {
-                Picker("Microphone", selection: $microphones.selection) {
-                    ForEach(microphones.devices) { device in
-                        Text(device.name).tag(Optional(device))
-                    }
+            }
+            // The microphone can be changed at any time, including mid-recording.
+            Picker("Microphone", selection: $microphones.selection) {
+                ForEach(microphones.devices) { device in
+                    Text(device.name).tag(Optional(device))
                 }
-                .frame(maxWidth: 300)
+            }
+            .frame(maxWidth: capture.isCapturing ? 220 : 300)
+            .onChange(of: microphones.selection) { _, newValue in
+                if capture.isCapturing, let device = newValue {
+                    Task { await capture.switchInput(to: device.captureDeviceID) }
+                }
             }
             Spacer()
             if let message = model.lastRecordingMessage {
