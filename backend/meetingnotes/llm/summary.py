@@ -117,12 +117,45 @@ def meeting_front_matter(conn: sqlite3.Connection, meeting_id: str,
     }
 
 
+# Below this many words of actual speech, there is nothing to summarise, so
+# the model is not asked (it would otherwise invent content).
+MIN_SPEECH_WORDS = 8
+
+NO_SPEECH_BODY = (
+    "No speech was detected in this recording, so there is nothing to "
+    "summarise. If you expected audio, check the microphone and system audio "
+    "input levels for next time."
+)
+
+
+def transcript_word_count(transcript: str) -> int:
+    """Words of spoken content, ignoring the heading and the bold speaker and
+    timestamp lines."""
+    words = 0
+    for line in transcript.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("**["):
+            continue
+        words += len(stripped.split())
+    return words
+
+
 def summarise_meeting(
     conn: sqlite3.Connection, vault: Vault, client: LMStudioClient, meeting_id: str,
     transcript: str, notes: str = "", ocr_texts: list[str] | None = None,
     allowlist: set[str] | None = None,
 ) -> SummaryResult:
-    """The summarise stage: generate, write meeting.md, record the status."""
+    """The summarise stage: generate, write meeting.md, record the status.
+    A recording with no real speech is not sent to the model; it gets a plain
+    note instead of a fabricated summary."""
+    if transcript_word_count(transcript) < MIN_SPEECH_WORDS and not notes.strip():
+        m.set_summary_status(conn, meeting_id, "ready")
+        conn.execute("UPDATE meetings SET summary_edited = 0 WHERE id = ?", (meeting_id,))
+        conn.commit()
+        front = meeting_front_matter(conn, meeting_id, summary_status="ready")
+        write_meeting_md(vault.meeting_md_path(meeting_id), front, NO_SPEECH_BODY)
+        return SummaryResult(body=NO_SPEECH_BODY, status="ready", attempts=0)
+
     prompt_template = vault.summary_prompt_path.read_text()
     result = generate_summary_text(client, prompt_template, transcript, notes, ocr_texts, allowlist)
     m.set_summary_status(conn, meeting_id, result.status)

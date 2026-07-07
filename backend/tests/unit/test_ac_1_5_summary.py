@@ -13,7 +13,8 @@ from meetingnotes.storage import meetings as m
 from meetingnotes.storage.frontmatter import read_meeting_md
 from tests.conftest import FakeLMClient, make_meeting
 
-TRANSCRIPT = "**[00:00:04] Ben Adams**\nWe reviewed the hydroponics budget."
+TRANSCRIPT = ("**[00:00:04] Ben Adams**\nWe reviewed the hydroponics budget in "
+              "detail and agreed the delivery timeline for the client this week.")
 NOTES = "Remember to chase the supplier quote."
 
 

@@ -55,7 +55,9 @@ public enum RuntimeLocation {
 /// 20: Granola-style bulleted summary prompt with a Decisions section; the
 ///     import reconciles every CSV row.
 /// 21: endpoint to restore the bundled default summary prompt into a vault.
-public let runtimeVersion = "21"
+/// 22: silent recordings skip transcription and get a plain no-speech note
+///     instead of a fabricated summary.
+public let runtimeVersion = "22"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

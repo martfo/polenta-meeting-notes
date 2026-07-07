@@ -17,7 +17,7 @@ from meetingnotes.llm.summary import summarise_meeting
 from meetingnotes.notes.notes import read_notes
 from meetingnotes.notes.ocr import OcrEngine, ocr_texts_for_meeting
 from meetingnotes.pipeline.runner import PipelineRunner
-from meetingnotes.pipeline.segments import load_segments, save_segments
+from meetingnotes.pipeline.segments import SegmentList, load_segments, save_segments
 from meetingnotes.storage import meetings as m
 from meetingnotes.storage.transcript import render_transcript
 from meetingnotes.storage.vault import Vault
@@ -46,11 +46,27 @@ def build_stages(
         names = asg.display_names(conn, meeting_id)
         vault.transcript_path(meeting_id).write_text(render_transcript(segments, names))
 
+    def _has_speech(meeting_id: str) -> bool:
+        path = segments_path(meeting_id)
+        return path.exists() and bool(load_segments(path).segments)
+
     def transcribe(meeting_id: str) -> None:
-        result = runner.transcribe(vault.audio_path(meeting_id))
+        from meetingnotes.pipeline.silence import is_silent
+
+        audio = vault.audio_path(meeting_id)
+        # Silence would make Whisper hallucinate a transcript, so a silent
+        # recording is recorded as having no speech and skips the rest.
+        if is_silent(audio, config.silence_rms_threshold):
+            save_segments(SegmentList(segments=[]), segments_path(meeting_id))
+            write_transcript(meeting_id)
+            return
+        result = runner.transcribe(audio)
         save_segments(result, segments_path(meeting_id))
 
     def diarise(meeting_id: str) -> None:
+        if not _has_speech(meeting_id):
+            write_transcript(meeting_id)
+            return
         row = m.get_meeting(conn, meeting_id)
         aligned = load_segments(segments_path(meeting_id))
         result = runner.diarise(
@@ -61,6 +77,8 @@ def build_stages(
         write_transcript(meeting_id)
 
     def enrich(meeting_id: str) -> None:
+        if not _has_speech(meeting_id):
+            return
         segments = load_segments(segments_path(meeting_id)).segments
         voiceprints = speaker_embedder.cluster_voiceprints(
             vault.audio_path(meeting_id), segments

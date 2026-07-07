@@ -22,6 +22,7 @@ class Config(BaseModel):
     veto_margin: float = 0.10
     audio_retention_days: int = 30
     ocr_enabled: bool = True
+    silence_rms_threshold: float = 0.006
     log_level: str = "info"
 
 
