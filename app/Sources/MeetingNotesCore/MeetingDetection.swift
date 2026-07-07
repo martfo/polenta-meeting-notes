@@ -5,13 +5,23 @@
 import Foundation
 
 public enum MeetingDetection {
-    /// A meeting is due from shortly before its start until a grace period
-    /// after it, so joining a call late still gets the offer.
+    /// A meeting is due from a few minutes before its start until well into
+    /// it, so joining a call late still gets the offer. The window is
+    /// deliberately generous, since a missed prompt means a lost recording.
     public static func isDue(
         start: Date, now: Date,
-        lead: TimeInterval = 120, grace: TimeInterval = 600
+        lead: TimeInterval = 300, grace: TimeInterval = 1500
     ) -> Bool {
         start.timeIntervalSince(now) <= lead && now.timeIntervalSince(start) <= grace
+    }
+
+    /// Whether an event is happening right now, used to title a recording
+    /// started by hand. True from just before the start until just after the
+    /// end.
+    public static func isHappeningNow(
+        start: Date, end: Date, now: Date, margin: TimeInterval = 300
+    ) -> Bool {
+        now >= start.addingTimeInterval(-margin) && now <= end.addingTimeInterval(margin)
     }
 
     /// Apps that carry calls. Most of them run all day, so their presence

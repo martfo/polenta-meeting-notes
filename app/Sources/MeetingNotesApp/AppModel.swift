@@ -41,6 +41,10 @@ final class AppModel: ObservableObject {
     /// that capture creates on Stop.
     var pendingAttendees: [MeetingAttendee] = []
 
+    /// The calendar meeting's end time carried from an accepted offer, for
+    /// scheduling auto-stop.
+    var pendingAutoStopEnd: Date?
+
     var vaultURL: URL? {
         vaultPath.isEmpty ? nil : URL(fileURLWithPath: vaultPath)
     }
@@ -115,6 +119,15 @@ final class AppModel: ObservableObject {
 
     func startRecording(microphone: InputDevice?) {
         guard let coordinator else { return }
+        // If this recording was not started from an accepted calendar offer,
+        // borrow the title, attendees, and end time from a meeting happening
+        // right now, so hand-started recordings are named and auto-stop too.
+        var autoStopEnd = pendingAutoStopEnd
+        if pendingTitle == nil, let current = calendar.currentEvent() {
+            pendingTitle = current.title
+            pendingAttendees = current.attendees.map { MeetingAttendee(name: $0.name, email: $0.email) }
+            autoStopEnd = current.end
+        }
         Task {
             // Ask for the microphone up front, so the consent prompt appears
             // the first time rather than the engine quietly running silent.
@@ -131,11 +144,41 @@ final class AppModel: ObservableObject {
                 // recording, so a tap failure leaves no meeting behind.
                 try await capture.start(microphoneDeviceID: microphone?.id)
                 coordinator.start()
+                scheduleAutoStop(meetingEnd: autoStopEnd)
+                pendingAutoStopEnd = nil
                 lastRecordingMessage = nil
             } catch {
                 coordinator.cancel()
                 lastRecordingMessage = "Recording could not start: \(error.localizedDescription)"
             }
+        }
+    }
+
+    // MARK: - Auto-stop
+
+    /// Auto-stop the recording at the calendar meeting's end (plus a short
+    /// grace), or after a maximum length as a safety net, whichever comes
+    /// first, so a forgotten recording stops itself.
+    private var autoStopTask: Task<Void, Never>?
+
+    private func scheduleAutoStop(meetingEnd: Date?) {
+        autoStopTask?.cancel()
+        let maxMinutes = UserDefaults.standard.object(forKey: "maxRecordingMinutes") as? Int ?? 180
+        var stopAt = Date().addingTimeInterval(Double(maxMinutes) * 60)
+        var reason = "the maximum recording length"
+        if let meetingEnd {
+            let candidate = meetingEnd.addingTimeInterval(120)  // 2 minutes past the end
+            if candidate < stopAt {
+                stopAt = candidate
+                reason = "the calendar meeting ended"
+            }
+        }
+        let delay = max(60, stopAt.timeIntervalSinceNow)
+        autoStopTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self, !Task.isCancelled, self.capture.isCapturing else { return }
+            self.lastRecordingMessage = "Recording stopped automatically because \(reason)."
+            self.stopRecording()
         }
     }
 
@@ -151,6 +194,7 @@ final class AppModel: ObservableObject {
 
     func stopRecording() {
         guard let coordinator else { return }
+        autoStopTask?.cancel()
         Task {
             let (wavData, source) = await capture.stop()
             let title = pendingTitle ?? "Meeting"

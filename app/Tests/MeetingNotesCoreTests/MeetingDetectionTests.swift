@@ -16,6 +16,17 @@ struct MeetingDetectionTests {
         #expect(!MeetingDetection.isDue(start: start, now: start.addingTimeInterval(3_000)), "long started")
     }
 
+    @Test("an event is happening now from just before its start to just after its end")
+    func test_happening_now() {
+        let start = Date(timeIntervalSince1970: 10_000)
+        let end = start.addingTimeInterval(3600)
+        #expect(MeetingDetection.isHappeningNow(start: start, end: end, now: start.addingTimeInterval(600)))
+        #expect(MeetingDetection.isHappeningNow(start: start, end: end, now: start.addingTimeInterval(-120)))
+        #expect(MeetingDetection.isHappeningNow(start: start, end: end, now: end.addingTimeInterval(120)))
+        #expect(!MeetingDetection.isHappeningNow(start: start, end: end, now: start.addingTimeInterval(-3600)))
+        #expect(!MeetingDetection.isHappeningNow(start: start, end: end, now: end.addingTimeInterval(3600)))
+    }
+
     @Test("a call prompt fires on a change, never on a steady state")
     func test_call_app_detection() {
         let slack = ["Finder", "Slack", "Dock"]

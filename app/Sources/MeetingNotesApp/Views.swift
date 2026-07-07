@@ -554,6 +554,7 @@ struct RecordingBar: View {
         model.pendingAttendees = offer.attendees.map {
             MeetingAttendee(name: $0.name, email: $0.email)
         }
+        model.pendingAutoStopEnd = offer.end
         calendar.accepted()
         model.startRecording(microphone: microphones.selection)
     }

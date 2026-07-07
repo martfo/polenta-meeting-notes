@@ -49,11 +49,19 @@ final class CalendarWatcher: ObservableObject {
         let title: String
         let reason: String
         let attendees: [OfferAttendee]
+        var end: Date?
     }
 
     struct OfferAttendee: Equatable {
         let name: String
         let email: String?
+    }
+
+    /// A calendar event in progress right now, for titling and auto-stop.
+    struct CurrentEvent {
+        let title: String
+        let end: Date
+        let attendees: [OfferAttendee]
     }
 
     @Published private(set) var offer: Offer?
@@ -74,7 +82,7 @@ final class CalendarWatcher: ObservableObject {
             await self?.requestAccess()
             while let self, !Task.isCancelled {
                 self.poll()
-                try? await Task.sleep(for: .seconds(30))
+                try? await Task.sleep(for: .seconds(15))
             }
         }
     }
@@ -115,7 +123,8 @@ final class CalendarWatcher: ObservableObject {
                     key: key,
                     title: title,
                     reason: "\(title) is due in your calendar.",
-                    attendees: attendees(of: event))
+                    attendees: attendees(of: event),
+                    end: event.endDate)
                 return
             }
         }
@@ -156,13 +165,33 @@ final class CalendarWatcher: ObservableObject {
     private func dueEvent() -> EKEvent? {
         let now = Date()
         let predicate = store.predicateForEvents(
-            withStart: now.addingTimeInterval(-600),
+            withStart: now.addingTimeInterval(-1500),
             end: now.addingTimeInterval(300),
             calendars: nil)
         return store.events(matching: predicate)
             .filter { !$0.isAllDay }
             .sorted { $0.startDate < $1.startDate }
             .first { MeetingDetection.isDue(start: $0.startDate, now: now) }
+    }
+
+    /// The event in progress right now, if any: the one whose start is closest
+    /// to now among those currently happening. Used to title a hand-started
+    /// recording and to schedule its auto-stop.
+    func currentEvent() -> CurrentEvent? {
+        guard accessGranted else { return nil }
+        let now = Date()
+        let predicate = store.predicateForEvents(
+            withStart: now.addingTimeInterval(-4 * 3600),
+            end: now.addingTimeInterval(600),
+            calendars: nil)
+        let event = store.events(matching: predicate)
+            .filter { !$0.isAllDay }
+            .filter { MeetingDetection.isHappeningNow(start: $0.startDate, end: $0.endDate, now: now) }
+            .min { abs($0.startDate.timeIntervalSince(now)) < abs($1.startDate.timeIntervalSince(now)) }
+        guard let event else { return nil }
+        return CurrentEvent(
+            title: event.title ?? "Meeting", end: event.endDate,
+            attendees: attendees(of: event))
     }
 
     private func attendees(of event: EKEvent) -> [OfferAttendee] {
