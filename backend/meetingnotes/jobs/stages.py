@@ -8,6 +8,8 @@ tests."""
 from __future__ import annotations
 
 import sqlite3
+import tempfile
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from meetingnotes.config import Config
@@ -17,7 +19,12 @@ from meetingnotes.llm.summary import summarise_meeting
 from meetingnotes.notes.notes import read_notes
 from meetingnotes.notes.ocr import OcrEngine, ocr_texts_for_meeting
 from meetingnotes.pipeline.runner import PipelineRunner
-from meetingnotes.pipeline.segments import SegmentList, load_segments, save_segments
+from meetingnotes.pipeline.segments import (
+    SegmentList,
+    load_segments,
+    merge_by_time,
+    save_segments,
+)
 from meetingnotes.storage import meetings as m
 from meetingnotes.storage.transcript import render_transcript
 from meetingnotes.storage.vault import Vault
@@ -41,6 +48,17 @@ def build_stages(
     def segments_path(meeting_id: str):
         return vault.meeting_dir(meeting_id) / SEGMENTS_FILE
 
+    def mic_path(meeting_id: str):
+        return vault.meeting_dir(meeting_id) / "mic.wav"
+
+    def system_path(meeting_id: str):
+        return vault.meeting_dir(meeting_id) / "system.wav"
+
+    def is_dual(meeting_id: str) -> bool:
+        """A recording captured as two channels: the owner on the mic, the
+        remote participants on the system audio."""
+        return mic_path(meeting_id).exists() and system_path(meeting_id).exists()
+
     def write_transcript(meeting_id: str) -> None:
         segments = load_segments(segments_path(meeting_id)).segments
         names = asg.display_names(conn, meeting_id)
@@ -50,8 +68,33 @@ def build_stages(
         path = segments_path(meeting_id)
         return path.exists() and bool(load_segments(path).segments)
 
+    def _transcribe_channel(audio_path, channel, speaker):
+        """Normalise a channel and transcribe it, tagging its segments. A
+        silent channel yields nothing."""
+        from meetingnotes.pipeline.normalize import normalise_wav
+        from meetingnotes.pipeline.silence import is_silent
+
+        if is_silent(audio_path, config.silence_rms_threshold):
+            return []
+        with tempfile.TemporaryDirectory() as tmp:
+            boosted = normalise_wav(audio_path, Path(tmp) / "norm.wav")
+            result = runner.transcribe(boosted)
+        for seg in result.segments:
+            seg.channel = channel
+            seg.speaker = speaker
+        return result.segments
+
     def transcribe(meeting_id: str) -> None:
         from meetingnotes.pipeline.silence import is_silent
+
+        if is_dual(meeting_id):
+            # The mic channel is entirely the owner and needs no diarisation;
+            # the system channel is diarised later.
+            mic_segments = _transcribe_channel(mic_path(meeting_id), "mic", config.owner_name)
+            system_segments = _transcribe_channel(system_path(meeting_id), "system", None)
+            merged = merge_by_time(mic_segments, system_segments)
+            save_segments(SegmentList(segments=merged), segments_path(meeting_id))
+            return
 
         audio = vault.audio_path(meeting_id)
         # Silence would make Whisper hallucinate a transcript, so a silent
@@ -68,6 +111,28 @@ def build_stages(
             write_transcript(meeting_id)
             return
         row = m.get_meeting(conn, meeting_id)
+
+        if is_dual(meeting_id):
+            # pyannote runs only on the system channel, where it has the
+            # simpler job of separating the remote speakers; the mic channel
+            # is already known to be the owner.
+            segments = load_segments(segments_path(meeting_id)).segments
+            mic_segments = [s for s in segments if s.channel == "mic"]
+            system_segments = [s for s in segments if s.channel == "system"]
+            if system_segments:
+                diarised = runner.diarise(
+                    system_path(meeting_id),
+                    SegmentList(segments=system_segments),
+                    expected_speakers=row["expected_speakers"],
+                ).segments
+                for seg in diarised:
+                    seg.channel = "system"
+                system_segments = diarised
+            merged = merge_by_time(mic_segments, system_segments)
+            save_segments(SegmentList(segments=merged), segments_path(meeting_id))
+            write_transcript(meeting_id)
+            return
+
         aligned = load_segments(segments_path(meeting_id))
         result = runner.diarise(
             vault.audio_path(meeting_id), aligned,
@@ -79,6 +144,38 @@ def build_stages(
     def enrich(meeting_id: str) -> None:
         if not _has_speech(meeting_id):
             return
+
+        if is_dual(meeting_id):
+            segments = load_segments(segments_path(meeting_id)).segments
+            mic_segments = [s for s in segments if s.channel == "mic"]
+            system_segments = [s for s in segments if s.channel == "system"]
+
+            # The owner is known from the mic channel: name it directly, and
+            # enrol the owner's voice from their own clean channel.
+            if mic_segments:
+                owner_vps = speaker_embedder.cluster_voiceprints(
+                    mic_path(meeting_id), mic_segments)
+                for label, vector in owner_vps.items():
+                    row_id = asg.record_cluster(gallery, meeting_id, label, [vector])
+                    asg.assign_from_attendee(gallery, row_id, config.owner_name)
+                    try:
+                        asg.confirm(gallery, row_id)
+                    except Exception:
+                        pass  # naming still stands even if enrolment fails
+
+            # The remote speakers are matched against the gallery as usual.
+            if system_segments:
+                remote_vps = speaker_embedder.cluster_voiceprints(
+                    system_path(meeting_id), system_segments)
+                for label, vector in sorted(remote_vps.items()):
+                    row_id = asg.record_cluster(gallery, meeting_id, label, [vector])
+                    asg.run_enrolment(
+                        gallery, row_id,
+                        threshold=config.match_threshold, veto_margin=config.veto_margin,
+                    )
+            write_transcript(meeting_id)
+            return
+
         segments = load_segments(segments_path(meeting_id)).segments
         voiceprints = speaker_embedder.cluster_voiceprints(
             vault.audio_path(meeting_id), segments

@@ -89,12 +89,24 @@ MeetingVault/
     2026-07-02_1400_client-review/
       meeting.md
       transcript.md
-      audio.wav
+      audio.wav                 mixed stream, for playback and retention
+      mic.wav                   owner channel (present for captured meetings)
+      system.wav                remote channel (present for captured meetings)
+      segments.json             pipeline output; segments carry a channel field
       notes.md
       assets/
 ```
 
 Folders are flat. A meeting belongs to exactly one folder.
+
+Recordings are captured as two channels: the microphone (the owner) as mic.wav and the
+system audio (remote participants) as system.wav, plus a mixed audio.wav for playback. The
+pipeline normalises and transcribes each channel separately, so quiet call audio is not
+buried under the louder microphone and discarded by the transcriber's voice-activity
+threshold. The mic channel is labelled with the owner name (config.owner_name) and needs no
+diarisation; pyannote runs only on the system channel to separate the remote speakers; the
+two are merged by timestamp into one transcript. Imported meetings (a single audio.wav, no
+channel files) use the original single-channel path.
 
 ## SQLite schema
 

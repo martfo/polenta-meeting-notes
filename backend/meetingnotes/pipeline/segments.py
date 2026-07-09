@@ -25,11 +25,25 @@ class Segment(BaseModel):
     speaker: str | None = None
     text: str
     words: list[Word] = []
+    # "mic" (the owner) or "system" (remote participants) when the recording
+    # was captured as two channels; None for a single mixed stream.
+    channel: str | None = None
 
 
 class SegmentList(BaseModel):
     language: str = "en"
     segments: list[Segment]
+
+
+def merge_by_time(*segment_lists: list[Segment]) -> list[Segment]:
+    """Interleave segments from several channels into one timeline, ordered by
+    start time. This is how the separately transcribed microphone and system
+    channels become a single 'me versus them' transcript."""
+    merged: list[Segment] = []
+    for segments in segment_lists:
+        merged.extend(segments)
+    merged.sort(key=lambda s: (s.start, s.end))
+    return merged
 
 
 def load_segments(path: Path) -> SegmentList:

@@ -14,14 +14,15 @@ final class MemoryStore: KeyValueStore {
 
 final class FakeBackend: BackendEnqueuing {
     var reachable = true
-    private(set) var imported: [(audioPath: String, title: String, source: String)] = []
+    private(set) var imported: [(audioPath: String, micPath: String?, systemPath: String?, title: String, source: String)] = []
 
     struct Down: Error {}
 
     @discardableResult
-    func importMeeting(audioPath: String, title: String, source: String) throws -> String {
+    func importMeeting(audioPath: String, micPath: String?, systemPath: String?,
+                       title: String, source: String) throws -> String {
         guard reachable else { throw Down() }
-        imported.append((audioPath, title, source))
+        imported.append((audioPath, micPath, systemPath, title, source))
         return "meeting-\(imported.count)"
     }
 }
@@ -31,6 +32,10 @@ func temporaryDirectory() -> URL {
         .appendingPathComponent("meetingnotes-tests-\(UUID().uuidString)")
     try! FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
+}
+
+func captureResult(mixed: Data, source: MeetingSource = .online) -> CaptureResult {
+    CaptureResult(mic: mixed, system: mixed, mixed: mixed, source: source)
 }
 
 func makeCoordinator(backend: FakeBackend) -> RecordingCoordinator {
@@ -160,7 +165,7 @@ struct AC_1_1_CaptureTests {
         let wav = AudioMixer.wavData(samples: [Int16](repeating: 0, count: 160))
 
         coordinator.start()
-        let outcome = try coordinator.stop(wavData: wav, title: "Meeting A", source: .online)
+        let outcome = try coordinator.stop(captureResult(mixed: wav), title: "Meeting A")
 
         #expect(outcome == .enqueued(meetingID: "meeting-1"))
         #expect(backend.imported.count == 1)
@@ -202,7 +207,7 @@ struct AC_1_1_CaptureTests {
         coordinator.start()
         // A header-only WAV (zero samples) captured nothing.
         let empty = AudioMixer.wavData(samples: [])
-        let outcome = try coordinator.stop(wavData: empty, title: "Meeting", source: .online)
+        let outcome = try coordinator.stop(captureResult(mixed: empty), title: "Meeting")
 
         #expect(outcome == .emptyRecording)
         #expect(backend.imported.isEmpty, "no meeting is created for empty audio")
@@ -217,14 +222,14 @@ struct AC_1_1_CaptureTests {
         let wav = AudioMixer.wavData(samples: [Int16](repeating: 0, count: 160))
 
         coordinator.start()
-        let outcome = try coordinator.stop(wavData: wav, title: "Offline capture", source: .inPerson)
+        let outcome = try coordinator.stop(captureResult(mixed: wav, source: .inPerson), title: "Offline capture")
 
         #expect(outcome == .pendingBackend)
         #expect(backend.imported.isEmpty)
 
         // The audio is safe on disk even though the backend never saw it.
         coordinator.start()
-        let second = try coordinator.stop(wavData: wav, title: "Second", source: .online)
+        let second = try coordinator.stop(captureResult(mixed: wav), title: "Second")
         #expect(second == .pendingBackend)
 
         // The backend comes back: everything pending is enqueued.

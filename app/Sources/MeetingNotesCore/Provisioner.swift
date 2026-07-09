@@ -59,7 +59,9 @@ public enum RuntimeLocation {
 ///     instead of a fabricated summary.
 /// 23: summary prompt variables ({{meeting_datetime}}), folder suggestions use
 ///     the summary, and the library listing carries the full start time.
-public let runtimeVersion = "23"
+/// 24: dual-channel capture and pipeline (mic vs system transcribed
+///     separately, remote-only diarisation), owner name, channel normalisation.
+public let runtimeVersion = "24"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

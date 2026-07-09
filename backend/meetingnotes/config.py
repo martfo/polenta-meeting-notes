@@ -18,6 +18,7 @@ class Config(BaseModel):
     lmstudio_base_url: str = "http://127.0.0.1:1234/v1"
     embedding_model: str = "bge-m3"
     language: str = "en"
+    owner_name: str = "Me"
     match_threshold: float = 0.75
     veto_margin: float = 0.10
     audio_retention_days: int = 30

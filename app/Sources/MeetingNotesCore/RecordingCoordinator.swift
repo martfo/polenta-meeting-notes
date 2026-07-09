@@ -7,23 +7,46 @@ import Foundation
 
 public struct PendingRecording: Codable, Equatable, Sendable {
     public let audioPath: String
+    public let micPath: String?
+    public let systemPath: String?
     public let title: String
     public let source: String
     public let recordedAt: Date
 
-    public init(audioPath: String, title: String, source: String, recordedAt: Date) {
+    public init(audioPath: String, micPath: String? = nil, systemPath: String? = nil,
+                title: String, source: String, recordedAt: Date) {
         self.audioPath = audioPath
+        self.micPath = micPath
+        self.systemPath = systemPath
         self.title = title
         self.source = source
         self.recordedAt = recordedAt
     }
 }
 
+/// The microphone and system audio captured as separate channels, plus a
+/// mixed stream for playback.
+public struct CaptureResult: Sendable {
+    public let mic: Data
+    public let system: Data
+    public let mixed: Data
+    public let source: MeetingSource
+
+    public init(mic: Data, system: Data, mixed: Data, source: MeetingSource) {
+        self.mic = mic
+        self.system = system
+        self.mixed = mixed
+        self.source = source
+    }
+}
+
 /// What the coordinator needs from the backend: enqueue-and-return-at-once.
 public protocol BackendEnqueuing {
-    /// Throws when the backend is unreachable.
+    /// Throws when the backend is unreachable. micPath and systemPath carry
+    /// the separate channels when the recording was captured as two streams.
     @discardableResult
-    func importMeeting(audioPath: String, title: String, source: String) throws -> String
+    func importMeeting(audioPath: String, micPath: String?, systemPath: String?,
+                       title: String, source: String) throws -> String
 }
 
 /// Pending recordings survive an app restart, so the store is a file.
@@ -93,17 +116,17 @@ public final class RecordingCoordinator {
         isRecording = false
     }
 
-    /// Write the mixed WAV to the vault's captures folder and hand it to the
-    /// backend. Returns at once either way; recording can start again
-    /// immediately.
+    /// Write the mic, system, and mixed streams to the vault's captures folder
+    /// and hand them to the backend. Returns at once either way; recording can
+    /// start again immediately.
     @discardableResult
-    public func stop(wavData: Data, title: String, source: MeetingSource) throws -> StopOutcome {
+    public func stop(_ result: CaptureResult, title: String) throws -> StopOutcome {
         isRecording = false
 
-        // A header-only or empty buffer captured nothing (a tap that never
-        // delivered, a permission quietly denied). Create no meeting rather
-        // than a 0-byte one that only fails processing.
-        guard wavData.count > minimumRecordingBytes else {
+        // A header-only or empty mixed buffer captured nothing (a tap that
+        // never delivered, a permission quietly denied). Create no meeting
+        // rather than a 0-byte one that only fails processing.
+        guard result.mixed.count > minimumRecordingBytes else {
             return .emptyRecording
         }
 
@@ -111,18 +134,28 @@ public final class RecordingCoordinator {
         let stamp = ISO8601DateFormatter().string(from: clock())
             .replacingOccurrences(of: ":", with: "")
         let audioURL = capturesDirectory.appendingPathComponent("capture-\(stamp).wav")
-        try wavData.write(to: audioURL, options: .atomic)
+        let micURL = capturesDirectory.appendingPathComponent("mic-\(stamp).wav")
+        let systemURL = capturesDirectory.appendingPathComponent("system-\(stamp).wav")
+        try result.mixed.write(to: audioURL, options: .atomic)
+        try result.mic.write(to: micURL, options: .atomic)
+        try result.system.write(to: systemURL, options: .atomic)
 
+        let recording = PendingRecording(
+            audioPath: audioURL.path, micPath: micURL.path, systemPath: systemURL.path,
+            title: title, source: result.source.rawValue, recordedAt: clock())
         do {
-            let meetingID = try backend.importMeeting(
-                audioPath: audioURL.path, title: title, source: source.rawValue)
-            return .enqueued(meetingID: meetingID)
+            return .enqueued(meetingID: try enqueue(recording))
         } catch {
-            pending.add(PendingRecording(
-                audioPath: audioURL.path, title: title,
-                source: source.rawValue, recordedAt: clock()))
+            pending.add(recording)
             return .pendingBackend
         }
+    }
+
+    private func enqueue(_ recording: PendingRecording) throws -> String {
+        try backend.importMeeting(
+            audioPath: recording.audioPath, micPath: recording.micPath,
+            systemPath: recording.systemPath, title: recording.title,
+            source: recording.source)
     }
 
     /// Called when the backend becomes reachable: enqueue whatever capture
@@ -133,8 +166,7 @@ public final class RecordingCoordinator {
         var flushed = 0
         for job in pending.all() {
             do {
-                try backend.importMeeting(
-                    audioPath: job.audioPath, title: job.title, source: job.source)
+                _ = try enqueue(job)
                 flushed += 1
             } catch {
                 remaining.append(job)

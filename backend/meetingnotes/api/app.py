@@ -45,6 +45,8 @@ class ImportRequest(BaseModel):
     title: str | None = None
     source: str = "online"
     expected_speakers: int | None = None
+    mic_path: str | None = None
+    system_path: str | None = None
 
 
 class ChatTurn(BaseModel):
@@ -120,6 +122,7 @@ def create_app(state: AppState) -> FastAPI:
         meeting_id = import_wav(
             conn, vault, source_path, title=request.title,
             source=request.source, expected_speakers=request.expected_speakers,
+            mic_path=request.mic_path, system_path=request.system_path,
         )
         state.worker.notify()
         return {"meeting_id": meeting_id}
@@ -310,6 +313,21 @@ def create_app(state: AppState) -> FastAPI:
         asg.assign_from_attendee(state.gallery, assignment_id, request.name)
         _refresh_for(assignment_id, old_name)
         return {"assigned": True}
+
+    @app.get("/settings/owner-name")
+    def get_owner_name() -> dict:
+        return {"owner_name": state.config.owner_name}
+
+    @app.put("/settings/owner-name")
+    def set_owner_name(request: FolderRequest) -> dict:
+        """The owner's display name: the microphone channel is labelled with
+        it, so the owner never needs diarising."""
+        from meetingnotes.config import save_config
+
+        name = request.name.strip() or "Me"
+        state.config.owner_name = name
+        save_config(state.config, vault.config_path)
+        return {"owner_name": name}
 
     @app.post("/settings/restore-summary-prompt")
     def restore_summary_prompt() -> dict:

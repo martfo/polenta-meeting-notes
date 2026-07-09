@@ -259,6 +259,8 @@ struct SettingsSheet: View {
                         .foregroundStyle(.secondary)
                 }
 
+                OwnerNameSection()
+
                 Section("Summaries") {
                     LabeledContent {
                         Button("Open") { model.editSummaryPrompt() }
@@ -341,6 +343,35 @@ struct SettingsSheet: View {
             } catch {
                 importStatus = "Import failed: \(error.localizedDescription)"
             }
+        }
+    }
+}
+
+struct OwnerNameSection: View {
+    @EnvironmentObject var model: AppModel
+    @State private var name = ""
+    @State private var loaded = false
+
+    var body: some View {
+        Section("Your name") {
+            Text("Recordings capture your microphone and the call audio as two "
+                 + "separate channels. Your microphone is labelled with this name, "
+                 + "so you never need naming, and only the remote voices are "
+                 + "separated.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                TextField("Your name", text: $name)
+                    .softField()
+                Button("Save") {
+                    Task { try? await model.client.setOwnerName(name) }
+                }
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .task {
+            guard !loaded else { return }
+            loaded = true
+            name = (try? await model.client.ownerName()) ?? "Me"
         }
     }
 }

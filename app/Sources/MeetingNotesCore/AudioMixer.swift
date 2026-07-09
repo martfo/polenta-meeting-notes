@@ -45,6 +45,13 @@ public enum AudioMixer {
         return mixed
     }
 
+    /// One channel of float samples as a 16-bit mono WAV, used to write the
+    /// microphone and system streams separately.
+    public static func monoWav(from floats: [Float], sampleRate: Int = targetSampleRate) -> Data {
+        let samples = floats.map { Int16(max(-1, min(1, $0)) * Float(Int16.max)) }
+        return wavData(samples: samples, sampleRate: sampleRate)
+    }
+
     /// A minimal RIFF/WAVE container: PCM, one channel, 16-bit.
     public static func wavData(samples: [Int16], sampleRate: Int = targetSampleRate) -> Data {
         let dataSize = samples.count * 2

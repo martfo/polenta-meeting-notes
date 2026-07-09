@@ -144,10 +144,10 @@ final class CaptureController: ObservableObject {
         return deviceID
     }
 
-    /// Stops capture off the main thread and returns the mixed WAV plus the
-    /// detected source.
-    func stop() async -> (wavData: Data, source: MeetingSource) {
-        let result = await withCheckedContinuation { (continuation: CheckedContinuation<(Data, MeetingSource), Never>) in
+    /// Stops capture off the main thread and returns the microphone and system
+    /// channels separately, a mixed stream for playback, and the source.
+    func stop() async -> CaptureResult {
+        let result = await withCheckedContinuation { (continuation: CheckedContinuation<CaptureResult, Never>) in
             ioQueue.async {
                 continuation.resume(returning: self.performStop())
             }
@@ -158,7 +158,7 @@ final class CaptureController: ObservableObject {
         return result
     }
 
-    nonisolated private func performStop() -> (wavData: Data, source: MeetingSource) {
+    nonisolated private func performStop() -> CaptureResult {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         tap.onBuffer = nil
@@ -170,7 +170,11 @@ final class CaptureController: ObservableObject {
         let mixed = AudioMixer.mixToMono16k(
             microphone: mic, microphoneRate: Double(AudioMixer.targetSampleRate),
             system: system, systemRate: Double(AudioMixer.targetSampleRate))
-        return (AudioMixer.wavData(samples: mixed), source)
+        return CaptureResult(
+            mic: AudioMixer.monoWav(from: mic),
+            system: AudioMixer.monoWav(from: system),
+            mixed: AudioMixer.wavData(samples: mixed),
+            source: source)
     }
 
     nonisolated private func selectInput(device: AudioDeviceID) throws {

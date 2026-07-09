@@ -29,8 +29,15 @@ def import_wav(
     started_at: datetime | None = None,
     source: str = "online",
     expected_speakers: int | None = None,
+    mic_path: Path | str | None = None,
+    system_path: Path | str | None = None,
 ) -> str:
     """Copy the WAV into a new meeting folder, create the row, enqueue a job.
+
+    When mic_path and system_path are given, the recording was captured as two
+    channels (the owner on the microphone, the remote participants on the
+    system audio); both are stored so the pipeline can transcribe them
+    separately. The mixed wav_path is kept for playback.
 
     Returns the meeting id without waiting for any processing.
     """
@@ -46,6 +53,11 @@ def import_wav(
     meeting_dir = vault.meeting_dir(meeting_id)
     meeting_dir.mkdir(parents=True)
     shutil.copyfile(wav_path, vault.audio_path(meeting_id))
+    if mic_path and system_path:
+        mic_path, system_path = Path(mic_path), Path(system_path)
+        if mic_path.exists() and system_path.exists():
+            shutil.copyfile(mic_path, meeting_dir / "mic.wav")
+            shutil.copyfile(system_path, meeting_dir / "system.wav")
 
     m.create_meeting(
         conn,

@@ -205,14 +205,11 @@ final class AppModel: ObservableObject {
         autoStopTask?.cancel()
         Task {
             defer { isTransitioning = false }
-            let (wavData, source) = await capture.stop()
+            let result = await capture.stop()
             let title = pendingTitle ?? "Meeting"
             pendingTitle = nil
             do {
-                let outcome = try coordinator.stop(
-                    wavData: wavData,
-                    title: title,
-                    source: source)
+                let outcome = try coordinator.stop(result, title: title)
                 switch outcome {
                 case .enqueued(let meetingID):
                     lastRecordingMessage = "Saved and queued for processing. You can start the next meeting now."

@@ -44,8 +44,10 @@ def purge_old_audio(
         started = datetime.fromisoformat(row["started_at"])
         if started.tzinfo is None:
             started = started.replace(tzinfo=timezone.utc)
-        audio = vault.audio_path(row["id"])
-        if started < cutoff and audio.exists():
-            audio.unlink()
+        meeting_dir = vault.meeting_dir(row["id"])
+        audio_files = [vault.audio_path(row["id"]), meeting_dir / "mic.wav", meeting_dir / "system.wav"]
+        if started < cutoff and any(f.exists() for f in audio_files):
+            for f in audio_files:
+                f.unlink(missing_ok=True)
             purged.append(row["id"])
     return purged

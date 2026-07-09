@@ -106,6 +106,16 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         let _: [String: AnyDecodable] = try await post("/settings/restore-summary-prompt", body: nil)
     }
 
+    func ownerName() async throws -> String {
+        struct Response: Codable { let owner_name: String }
+        let response: Response = try await get("/settings/owner-name")
+        return response.owner_name
+    }
+
+    func setOwnerName(_ name: String) async throws {
+        let _: [String: AnyDecodable] = try await put("/settings/owner-name", body: ["name": name])
+    }
+
     /// Returns the backend's summary decision: none, regenerating, or prompt
     /// (the summary is hand-edited, so ask before replacing it).
     @discardableResult
@@ -211,9 +221,12 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
     // MARK: - BackendEnqueuing (synchronous: called from the recording path)
 
     @discardableResult
-    func importMeeting(audioPath: String, title: String, source: String) throws -> String {
+    func importMeeting(audioPath: String, micPath: String?, systemPath: String?,
+                       title: String, source: String) throws -> String {
         struct Imported: Codable { let meeting_id: String }
-        let body = ["path": audioPath, "title": title, "source": source]
+        var body = ["path": audioPath, "title": title, "source": source]
+        if let micPath { body["mic_path"] = micPath }
+        if let systemPath { body["system_path"] = systemPath }
         let result: Imported = try syncRequest("POST", "/meetings/import", body: body)
         return result.meeting_id
     }
