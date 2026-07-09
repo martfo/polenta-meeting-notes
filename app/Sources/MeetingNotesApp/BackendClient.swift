@@ -12,6 +12,7 @@ struct MeetingSummaryRow: Codable, Identifiable, Hashable {
     let id: String
     let title: String
     let date: String
+    let started_at: String
     let attendees: [String]
     let folder: String?
     let processing_status: String

@@ -451,13 +451,24 @@ struct LibraryList: View {
     @EnvironmentObject var model: AppModel
     // Folders start expanded; a folder the user collapses is remembered here.
     @State private var collapsed: Set<String> = []
+    @AppStorage("libraryGrouping") private var grouping = "folders"
 
     var body: some View {
-        meetingList
-            .navigationSplitViewColumnWidth(min: 240, ideal: 300)
+        VStack(spacing: 0) {
+            Picker("", selection: $grouping) {
+                Text("Folders").tag("folders")
+                Text("Date").tag("date")
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            Divider()
+            if grouping == "date" { dateList } else { folderList }
+        }
+        .navigationSplitViewColumnWidth(min: 240, ideal: 300)
     }
 
-    private var meetingList: some View {
+    private var folderList: some View {
         List(selection: $model.selectedMeetingID) {
             ForEach(model.library) { group in
                 Section(isExpanded: expanded(group.id)) {
@@ -474,6 +485,33 @@ struct LibraryList: View {
         .task { await model.refreshLibrary() }
     }
 
+    private var dateBuckets: [(name: String, meetings: [MeetingSummaryRow])] {
+        let now = Date()
+        let all = model.library.flatMap(\.meetings)
+            .sorted { $0.started_at > $1.started_at }
+        var byBucket: [String: [MeetingSummaryRow]] = [:]
+        for meeting in all {
+            byBucket[DateGrouping.bucket(for: meeting.started_at, now: now), default: []].append(meeting)
+        }
+        return byBucket
+            .sorted { DateGrouping.sortIndex(of: $0.key) < DateGrouping.sortIndex(of: $1.key) }
+            .map { ($0.key, $0.value) }
+    }
+
+    private var dateList: some View {
+        List(selection: $model.selectedMeetingID) {
+            ForEach(dateBuckets, id: \.name) { bucket in
+                Section(bucket.name) {
+                    ForEach(bucket.meetings) { meeting in
+                        meetingRow(meeting, showFolder: true).tag(meeting.id)
+                    }
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .refreshable { await model.refreshLibrary() }
+    }
+
     private func expanded(_ id: String) -> Binding<Bool> {
         Binding(
             get: { !collapsed.contains(id) },
@@ -482,12 +520,14 @@ struct LibraryList: View {
             })
     }
 
-    private func meetingRow(_ meeting: MeetingSummaryRow) -> some View {
+    private func meetingRow(_ meeting: MeetingSummaryRow, showFolder: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(meeting.title).fontWeight(.medium)
             HStack(spacing: 6) {
                 Text(meeting.date)
-                if !meeting.attendees.isEmpty {
+                if showFolder, let folder = meeting.folder {
+                    Text(folder)
+                } else if !meeting.attendees.isEmpty {
                     Text(meeting.attendees.joined(separator: ", "))
                         .lineLimit(1)
                 }

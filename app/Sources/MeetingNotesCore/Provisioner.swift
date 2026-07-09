@@ -57,7 +57,9 @@ public enum RuntimeLocation {
 /// 21: endpoint to restore the bundled default summary prompt into a vault.
 /// 22: silent recordings skip transcription and get a plain no-speech note
 ///     instead of a fabricated summary.
-public let runtimeVersion = "22"
+/// 23: summary prompt variables ({{meeting_datetime}}), folder suggestions use
+///     the summary, and the library listing carries the full start time.
+public let runtimeVersion = "23"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

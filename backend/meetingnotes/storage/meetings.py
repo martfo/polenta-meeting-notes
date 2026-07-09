@@ -106,6 +106,7 @@ def library_listing(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                 "id": row["id"],
                 "title": row["title"],
                 "date": row["started_at"][:10],
+                "started_at": row["started_at"],
                 "attendees": attendees,
                 "folder": row["folder_name"],
                 "processing_status": row["processing_status"],

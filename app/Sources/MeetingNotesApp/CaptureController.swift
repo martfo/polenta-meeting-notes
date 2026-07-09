@@ -86,6 +86,13 @@ final class CaptureController: ObservableObject {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         let inputRate = format.sampleRate
+        // An absent or invalid input device gives a zero format; installing a
+        // tap on it crashes the engine. Record system audio only in that case.
+        guard format.channelCount > 0, inputRate > 0 else {
+            engine.prepare()
+            try engine.start()
+            return
+        }
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
             guard let self, let channel = buffer.floatChannelData?[0] else { return }
             let mono = Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))

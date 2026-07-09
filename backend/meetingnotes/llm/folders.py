@@ -11,10 +11,14 @@ from meetingnotes.llm.client import LMStudioClient
 from meetingnotes.llm.errors import LMStudioUnavailable
 
 SUGGESTION_PROMPT = (
-    "Choose the best folder for this meeting from the existing list, or "
-    "propose one new folder name if none fits. Reply with strict JSON and "
-    'nothing else, in exactly this shape: {{"folder": "<name>", "is_new": '
-    "<true or false>}}\n\nExisting folders: {folders}\n\nMeeting:\n{context}"
+    "Suggest which folder this meeting belongs in. Strongly prefer an existing "
+    "folder from the list: choose one whenever the meeting plausibly fits it, "
+    "matching on the client, project, team, or topic. Only propose a new "
+    "folder when none of the existing ones fit, and then give it a short, "
+    "general name (a client, project, or team name), not the meeting's title. "
+    "Reply with strict JSON and nothing else, in exactly this shape: "
+    '{{"folder": "<name>", "is_new": <true or false>}}\n\n'
+    "Existing folders: {folders}\n\nMeeting:\n{context}"
 )
 
 

@@ -117,8 +117,13 @@ final class AppModel: ObservableObject {
 
     // MARK: - Recording
 
+    /// Guards start/stop so a rapid double press (button plus hotkey, or a
+    /// hotkey repeat) cannot start or stop twice and crash the audio engine.
+    private var isTransitioning = false
+
     func startRecording(microphone: InputDevice?) {
-        guard let coordinator else { return }
+        guard let coordinator, !capture.isCapturing, !isTransitioning else { return }
+        isTransitioning = true
         // If this recording was not started from an accepted calendar offer,
         // borrow the title, attendees, and end time from a meeting happening
         // right now, so hand-started recordings are named and auto-stop too.
@@ -129,6 +134,7 @@ final class AppModel: ObservableObject {
             autoStopEnd = current.end
         }
         Task {
+            defer { isTransitioning = false }
             // Ask for the microphone up front, so the consent prompt appears
             // the first time rather than the engine quietly running silent.
             let granted = await CaptureController.requestMicrophoneAccess()
@@ -182,9 +188,10 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Start or stop, whichever is not current. Driven by the global hotkey.
+    /// Start or stop, whichever is not current. Driven by the global hotkey,
+    /// so pressing it again stops the recording.
     func toggleRecording() {
-        guard coordinator != nil else { return }
+        guard coordinator != nil, !isTransitioning else { return }
         if capture.isCapturing {
             stopRecording()
         } else {
@@ -193,9 +200,11 @@ final class AppModel: ObservableObject {
     }
 
     func stopRecording() {
-        guard let coordinator else { return }
+        guard let coordinator, capture.isCapturing, !isTransitioning else { return }
+        isTransitioning = true
         autoStopTask?.cancel()
         Task {
+            defer { isTransitioning = false }
             let (wavData, source) = await capture.stop()
             let title = pendingTitle ?? "Meeting"
             pendingTitle = nil

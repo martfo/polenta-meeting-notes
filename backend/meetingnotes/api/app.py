@@ -225,7 +225,24 @@ def create_app(state: AppState) -> FastAPI:
     @app.post("/meetings/{meeting_id}/suggest-folder")
     def folder_suggestion(meeting_id: str) -> dict:
         row = m.get_meeting(conn, meeting_id)
-        suggestion = suggest_folder(state.lm_client, fol.list_folders(conn), row["title"])
+        # Give the model the title, attendees, and a slice of the summary or
+        # transcript, so the suggestion reflects what the meeting was about
+        # rather than a bare title.
+        parts = [f"Title: {row['title']}"]
+        attendees = [a["name"] for a in m.list_attendees(conn, meeting_id)]
+        if attendees:
+            parts.append("Attendees: " + ", ".join(attendees))
+        meeting_md = vault.meeting_md_path(meeting_id)
+        transcript_path = vault.transcript_path(meeting_id)
+        if meeting_md.exists():
+            from meetingnotes.storage.frontmatter import read_meeting_md
+
+            _, body = read_meeting_md(meeting_md)
+            parts.append("Summary:\n" + body[:1500])
+        elif transcript_path.exists():
+            parts.append("Transcript extract:\n" + transcript_path.read_text()[:1500])
+
+        suggestion = suggest_folder(state.lm_client, fol.list_folders(conn), "\n\n".join(parts))
         if suggestion is None:
             return {"folder": None, "is_new": False}
         return {"folder": suggestion.folder, "is_new": suggestion.is_new}

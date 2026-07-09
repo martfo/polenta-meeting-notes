@@ -83,7 +83,6 @@ public final class RecordingCoordinator {
     }
 
     public func start() {
-        precondition(!isRecording, "already recording")
         isRecording = true
     }
 
@@ -99,7 +98,6 @@ public final class RecordingCoordinator {
     /// immediately.
     @discardableResult
     public func stop(wavData: Data, title: String, source: MeetingSource) throws -> StopOutcome {
-        precondition(isRecording, "not recording")
         isRecording = false
 
         // A header-only or empty buffer captured nothing (a tap that never

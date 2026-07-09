@@ -106,6 +106,23 @@ def test_ac_1_5_d_validator_mandatory_and_optional(canned):
     assert (result.attempts, result.status) == (1, "ready")
 
 
+def test_prompt_variables_filled_from_meeting(conn, vault):
+    """{{meeting_datetime}} and friends are replaced with the meeting's own
+    details; unknown placeholders are left untouched."""
+    from meetingnotes.llm.summary import fill_prompt_variables
+
+    meeting_id = make_meeting(conn, vault)  # started 2026-07-02T14:00:00+01:00
+    template = ("Meeting date and time: {{meeting_datetime}}\n"
+                "Title: {{meeting_title}}\nDate: {{meeting_date}}\nKeep: {{unknown}}")
+
+    filled = fill_prompt_variables(template, conn, meeting_id)
+
+    assert "{{meeting_datetime}}" not in filled
+    assert "2 July 2026" in filled and "14:00" in filled
+    assert "Client review" in filled
+    assert "{{unknown}}" in filled, "unknown placeholders are left as written"
+
+
 def test_ac_1_5_e_em_dash_strip():
     """No em dashes survive the strip."""
     text = "The budget — which is tight — was approved.\n— A dangling aside\nEnd—start."
