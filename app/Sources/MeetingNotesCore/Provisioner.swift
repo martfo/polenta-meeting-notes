@@ -61,7 +61,11 @@ public enum RuntimeLocation {
 ///     the summary, and the library listing carries the full start time.
 /// 24: dual-channel capture and pipeline (mic vs system transcribed
 ///     separately, remote-only diarisation), owner name, channel normalisation.
-public let runtimeVersion = "24"
+/// 25: audio is decoded for transcription and diarisation with the standard
+///     library instead of WhisperX's ffmpeg shell-out, so the shipped app
+///     needs no manual ffmpeg install; and Whisper is fed an initial prompt of
+///     the meeting's participant names and the configured glossary.
+public let runtimeVersion = "25"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

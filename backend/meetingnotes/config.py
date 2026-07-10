@@ -24,6 +24,10 @@ class Config(BaseModel):
     audio_retention_days: int = 30
     ocr_enabled: bool = True
     silence_rms_threshold: float = 0.006
+    # Domain vocabulary (product names, jargon, acronyms) fed to Whisper as an
+    # initial prompt alongside the meeting's participant names, so it biases
+    # towards them instead of guessing a common-word homophone.
+    glossary: list[str] = []
     log_level: str = "info"
 
 

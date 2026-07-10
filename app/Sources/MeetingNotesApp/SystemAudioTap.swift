@@ -34,8 +34,10 @@ final class SystemAudioTap {
     private(set) var sampleRate: Double = 48_000
     private var buffersReceived = 0
 
-    /// Mono float samples at `sampleRate`, delivered from the IO thread.
-    var onBuffer: (([Float]) -> Void)?
+    /// Mono float samples at `sampleRate`, with the host time (seconds) of the
+    /// buffer's first sample, delivered from the IO thread. The host time puts
+    /// the system channel on the same clock as the microphone.
+    var onBuffer: (([Float], Double) -> Void)?
 
     func start() throws {
         let description = TapFactory.makeGlobalTapDescription()
@@ -75,8 +77,8 @@ final class SystemAudioTap {
 
         var procID: AudioDeviceIOProcID?
         try check(
-            AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, nil) { [weak self] _, inputData, _, _, _ in
-                self?.deliver(inputData.pointee)
+            AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, nil) { [weak self] _, inputData, inputTime, _, _ in
+                self?.deliver(inputData.pointee, at: inputTime.pointee)
             },
             "attaching to the capture device")
         ioProcID = procID
@@ -107,7 +109,7 @@ final class SystemAudioTap {
 
     // MARK: - Plumbing
 
-    private func deliver(_ bufferList: AudioBufferList) {
+    private func deliver(_ bufferList: AudioBufferList, at inputTime: AudioTimeStamp) {
         var list = bufferList
         let buffers = UnsafeMutableAudioBufferListPointer(&list)
         guard let onBuffer else { return }
@@ -115,6 +117,11 @@ final class SystemAudioTap {
         if buffersReceived == 1 {
             tapLog.info("first tap buffer arrived")
         }
+        // The IO proc stamps each buffer with the host time of its first frame;
+        // fall back to now if the driver leaves it invalid, so the system
+        // channel still shares the microphone's clock.
+        let hostValid = inputTime.mFlags.contains(.hostTimeValid)
+        let hostSeconds = HostClock.seconds(hostValid ? inputTime.mHostTime : mach_absolute_time())
         for buffer in buffers {
             guard let data = buffer.mData else { continue }
             let channels = max(1, Int(buffer.mNumberChannels))
@@ -130,7 +137,7 @@ final class SystemAudioTap {
                 }
                 mono[frame] = sum / Float(channels)
             }
-            onBuffer(mono)
+            onBuffer(mono, hostSeconds)
         }
     }
 

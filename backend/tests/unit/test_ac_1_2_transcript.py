@@ -19,7 +19,7 @@ class RecordingEngine:
             {"start": 0.5, "end": 2.0, "text": "Hello there.", "words": []},
         ]
 
-    def transcribe(self, audio_path, language):
+    def transcribe(self, audio_path, language, initial_prompt=None):
         self.calls.append(("transcribe", language))
         return {"segments": self._segments, "language": language}
 

@@ -36,11 +36,11 @@ message of the session; `DESIGN.md` reconciles it with the code.
 
 ### Toolchain gotchas (all already handled, but know them)
 - **uv** is required (`brew install uv`); backend runs under Python 3.11.
-- **ffmpeg** is a per-Mac prerequisite (`brew install ffmpeg`) — WhisperX shells out to it.
-  **This is a sign-off blocker (task #13): the shipped app must not need a manual ffmpeg
-  install.** Either bundle a signed static arm64 ffmpeg, or drop the dependency by feeding
-  WhisperX preloaded audio arrays. The supervisor currently patches `/opt/homebrew/bin` onto
-  the backend child's PATH so the dev build works.
+- **ffmpeg is no longer needed** (task #13 resolved, runtime 25). `pipeline/audio_io.py`
+  decodes audio with the standard library into the float32 mono 16 kHz array WhisperX and
+  pyannote want (vault audio is already 16 kHz mono PCM); off-rate/multichannel/other-container
+  audio is converted with `/usr/bin/afconvert` (ships with macOS). The supervisor no longer
+  patches Homebrew onto the backend child's PATH.
 - **Swift Testing on Command-Line-Tools-only machines**: `Testing.framework` isn't on
   SwiftPM's default search path. The Makefile's `gate-app` adds `-F`/rpath flags and
   `-disable-cross-import-overlays`. With full Xcode the flags collapse to nothing.
@@ -69,13 +69,22 @@ plus a long tail of enhancements from a week of real use. Notable subsystems:
   for system audio; AVAudioEngine for mic. Setup runs OFF the main thread (fixes beachball).
   `CaptureController` is `@MainActor` with `nonisolated(unsafe)` audio objects driven on
   `ioQueue`. Input picker has a "System default" option (auto-follows AirPods) and switches
-  mid-recording.
+  mid-recording. **Common clock (added after runtime 24, app-only):** the two streams run on
+  different device clocks, so each buffer is placed at its own host time against one shared
+  origin (`AudioMixer.place`, fed by the AVAudioTime/AudioTimeStamp the callbacks used to
+  discard); a stall becomes silence, not a shift, so mic.wav and system.wav stay the same
+  length and index→time matches. This fixes the "one speaker's turns piled at the end" merge
+  skew. **Needs a real-call check** (host-time glue is untestable off-hardware); the pure
+  placement logic is gate-tested.
 - **Pipeline** (`jobs/stages.py`): if `mic.wav`+`system.wav` exist → dual path: normalise each
   channel (`pipeline/normalize.py`, lifts quiet call audio above VAD), transcribe both, mic →
   owner name (no diarisation), pyannote only on system, merge by timestamp
   (`segments.merge_by_time`). Else single-channel (imports). Silence detection
   (`pipeline/silence.py`) skips transcription of silent audio; summary guard writes a
   "no speech" note instead of a hallucinated summary. Segments carry a `channel` field.
+  Before transcription a Whisper initial prompt is built from the owner + calendar attendees +
+  `config.glossary` (`pipeline/vocabulary.py`) and applied to both channels, biasing towards
+  real names and domain terms. WhisperX reloads the model when the prompt changes.
 - **Enrolment**: voice gallery with threshold/veto matching, false-attribution correction
   that teaches the gallery. Owner voice enrolled from the clean mic channel.
 - **Summary**: prompt at `settings/summary_prompt.md` (per-vault copy; bundled default is the
@@ -124,8 +133,10 @@ plus a long tail of enhancements from a week of real use. Notable subsystems:
 
 ## Pending / open
 
-- **Task #13 (sign-off blocker)**: remove the manual ffmpeg dependency (bundle static ffmpeg,
-  or feed WhisperX preloaded arrays). See memory `ffmpeg-signoff-blocker`.
+- ~~**Task #13 (sign-off blocker)**: remove the manual ffmpeg dependency.~~ **Done** (runtime
+  25): WhisperX/pyannote are fed preloaded arrays via `pipeline/audio_io.py`, with afconvert
+  for non-16k-mono imports. No bundled binary. Still wants a real-call [pipeline]-tier run to
+  confirm diarisation accepts the preloaded array on the installed whisperx.
 - **Task #14**: enrolment management screen (Phase 2.3 UI) — backend module
   `enrolment/management.py` is built and tested; the SwiftUI screen + endpoints are not.
 - **Model choice**: default guidance is Qwen3-30B-A3B-Instruct in LM Studio; a larger model
@@ -139,6 +150,18 @@ dual-channel capture actually splitting me/them, the remote channel no longer lo
 normalisation, mid-recording input switching, auto-stop timing, and the global hotkey while
 another app is focused. The Console subsystem for capture/tap diagnostics is
 `co.uk.designturbine.meetingnotes`.
+
+Added this session, still needing a real call:
+- **Timeline common-clock fix** (`AudioMixer.place` + `CaptureController`/`SystemAudioTap`):
+  confirm mic.wav and system.wav come out the same length and the merged transcript interleaves
+  correctly (no "monologue at the end"). If `system.wav` is still shorter than the meeting, the
+  tap is dropping quiet remote audio — a capture-gain problem, not the merge (see below).
+- **Vocabulary prompt** confirm WhisperX accepts `asr_options={"initial_prompt": ...}` on the
+  installed version and that reload-on-prompt-change works; check names/terms land in the text.
+- **Remote-channel capture quality** (feedback item): `system.wav` is already saved per
+  meeting — listen to one to tell capture problems from transcription problems in five minutes.
+  If remote speech is quiet/dropping at the tap, that is gain/format at capture, separate from
+  the merge and the vocabulary prompt.
 
 ## User environment specifics
 

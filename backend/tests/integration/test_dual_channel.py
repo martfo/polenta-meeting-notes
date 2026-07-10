@@ -48,7 +48,7 @@ class ChannelEngine:
         self.by_name = by_name  # filename stem -> [(start, end, text)]
         self.transcribed: list[str] = []
 
-    def transcribe(self, audio_path, language):
+    def transcribe(self, audio_path, language, initial_prompt=None):
         # After normalisation the file is norm.wav; use the parent to identify
         # which channel it came from is not possible, so key on content length.
         raise NotImplementedError
@@ -68,7 +68,7 @@ def test_dual_channel_pipeline_merges_owner_and_remote(conn, vault):
     class DualEngine:
         """Owner says one line; remote says two (to be diarised into speakers)."""
 
-        def transcribe(self, audio_path, language):
+        def transcribe(self, audio_path, language, initial_prompt=None):
             # mic normalised first, then system: distinguish by call order.
             self.calls = getattr(self, "calls", 0) + 1
             if self.calls == 1:
@@ -126,7 +126,7 @@ def test_single_channel_still_works(conn, vault, fixtures_dir):
                     vault.audio_path(meeting_id))
 
     class Engine:
-        def transcribe(self, audio_path, language):
+        def transcribe(self, audio_path, language, initial_prompt=None):
             return {"segments": [{"start": 0.0, "end": 2.0, "text": "Hello.", "words": []}]}
 
         def align(self, result, audio_path, language, model_name):

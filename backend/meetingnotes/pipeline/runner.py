@@ -18,7 +18,9 @@ ENGLISH_ALIGNMENT_MODEL = "WAV2VEC2_ASR_LARGE_LV60K_960H"
 
 
 class TranscriptionEngine(Protocol):
-    def transcribe(self, audio_path: Path, language: str) -> dict: ...
+    def transcribe(
+        self, audio_path: Path, language: str, initial_prompt: str | None = None
+    ) -> dict: ...
 
     def align(self, result: dict, audio_path: Path, language: str, model_name: str) -> dict: ...
 
@@ -31,9 +33,10 @@ class PipelineRunner:
     def __init__(self, engine: TranscriptionEngine):
         self.engine = engine
 
-    def transcribe(self, audio_path: Path) -> SegmentList:
-        """Whisper transcription plus English word-level alignment."""
-        raw = self.engine.transcribe(audio_path, language=LANGUAGE)
+    def transcribe(self, audio_path: Path, initial_prompt: str | None = None) -> SegmentList:
+        """Whisper transcription plus English word-level alignment. The optional
+        initial prompt biases Whisper towards the meeting's names and terms."""
+        raw = self.engine.transcribe(audio_path, language=LANGUAGE, initial_prompt=initial_prompt)
         aligned = self.engine.align(
             raw, audio_path, language=LANGUAGE, model_name=ENGLISH_ALIGNMENT_MODEL
         )

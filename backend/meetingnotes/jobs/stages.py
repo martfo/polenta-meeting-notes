@@ -25,6 +25,7 @@ from meetingnotes.pipeline.segments import (
     merge_by_time,
     save_segments,
 )
+from meetingnotes.pipeline.vocabulary import build_initial_prompt
 from meetingnotes.storage import meetings as m
 from meetingnotes.storage.transcript import render_transcript
 from meetingnotes.storage.vault import Vault
@@ -68,7 +69,14 @@ def build_stages(
         path = segments_path(meeting_id)
         return path.exists() and bool(load_segments(path).segments)
 
-    def _transcribe_channel(audio_path, channel, speaker):
+    def _vocabulary_prompt(meeting_id: str) -> str | None:
+        """The meeting's people and the configured glossary, as a Whisper
+        prompt that biases transcription towards names and domain terms."""
+        names = [config.owner_name]
+        names += [row["name"] for row in m.list_attendees(conn, meeting_id) if row["name"]]
+        return build_initial_prompt(names, config.glossary)
+
+    def _transcribe_channel(audio_path, channel, speaker, prompt):
         """Normalise a channel and transcribe it, tagging its segments. A
         silent channel yields nothing."""
         from meetingnotes.pipeline.normalize import normalise_wav
@@ -78,7 +86,7 @@ def build_stages(
             return []
         with tempfile.TemporaryDirectory() as tmp:
             boosted = normalise_wav(audio_path, Path(tmp) / "norm.wav")
-            result = runner.transcribe(boosted)
+            result = runner.transcribe(boosted, initial_prompt=prompt)
         for seg in result.segments:
             seg.channel = channel
             seg.speaker = speaker
@@ -87,11 +95,15 @@ def build_stages(
     def transcribe(meeting_id: str) -> None:
         from meetingnotes.pipeline.silence import is_silent
 
+        prompt = _vocabulary_prompt(meeting_id)
+
         if is_dual(meeting_id):
             # The mic channel is entirely the owner and needs no diarisation;
             # the system channel is diarised later.
-            mic_segments = _transcribe_channel(mic_path(meeting_id), "mic", config.owner_name)
-            system_segments = _transcribe_channel(system_path(meeting_id), "system", None)
+            mic_segments = _transcribe_channel(
+                mic_path(meeting_id), "mic", config.owner_name, prompt)
+            system_segments = _transcribe_channel(
+                system_path(meeting_id), "system", None, prompt)
             merged = merge_by_time(mic_segments, system_segments)
             save_segments(SegmentList(segments=merged), segments_path(meeting_id))
             return
@@ -103,7 +115,7 @@ def build_stages(
             save_segments(SegmentList(segments=[]), segments_path(meeting_id))
             write_transcript(meeting_id)
             return
-        result = runner.transcribe(audio)
+        result = runner.transcribe(audio, initial_prompt=prompt)
         save_segments(result, segments_path(meeting_id))
 
     def diarise(meeting_id: str) -> None:

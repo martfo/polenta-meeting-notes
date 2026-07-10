@@ -101,12 +101,22 @@ Folders are flat. A meeting belongs to exactly one folder.
 
 Recordings are captured as two channels: the microphone (the owner) as mic.wav and the
 system audio (remote participants) as system.wav, plus a mixed audio.wav for playback. The
-pipeline normalises and transcribes each channel separately, so quiet call audio is not
-buried under the louder microphone and discarded by the transcriber's voice-activity
+microphone and the system-audio tap run on different device clocks and deliver buffers
+independently, so every buffer is placed at its own host time against a single origin shared
+by both channels (see AudioMixer.place): a stall on either stream becomes silence rather than
+a shift, so sample index maps to the same instant in both WAVs and they are the same length.
+Without this the channels drift apart and merging by start time piles one speaker's turns at
+the end. The pipeline normalises and transcribes each channel separately, so quiet call audio
+is not buried under the louder microphone and discarded by the transcriber's voice-activity
 threshold. The mic channel is labelled with the owner name (config.owner_name) and needs no
 diarisation; pyannote runs only on the system channel to separate the remote speakers; the
 two are merged by timestamp into one transcript. Imported meetings (a single audio.wav, no
 channel files) use the original single-channel path.
+
+Before transcription each meeting builds a Whisper initial prompt from its participant names
+(the owner plus calendar attendees) and the configured glossary (config.glossary), so the
+model biases towards those words instead of a common-word homophone. The prompt is applied to
+both channels. See pipeline/vocabulary.py.
 
 ## SQLite schema
 
@@ -161,9 +171,13 @@ and the embedding vector.
   "veto_margin": 0.10,
   "audio_retention_days": 30,
   "ocr_enabled": true,
+  "glossary": ["Camunda", "Workato", "CoSec"],
   "log_level": "info"
 }
 ```
+
+glossary is an optional list of domain terms (product names, jargon, acronyms) fed to
+Whisper as an initial prompt alongside the meeting's participant names.
 
 The Hugging Face token is not in this file. It lives in the Keychain.
 
@@ -311,13 +325,15 @@ unified logging and mirrors errors to the same file.
 
 ## Toolchain notes
 
-WhisperX loads audio by shelling out to ffmpeg, so ffmpeg is currently a per-Mac
-prerequisite (brew install ffmpeg), documented in the README, and the supervisor adds
-the Homebrew paths to the backend's PATH. Committed before sign-off: the shipped app
-must not need this manual install. Either a static arm64 ffmpeg is bundled and signed
-inside the app, or the dependency is removed by feeding WhisperX preloaded audio
-arrays (vault audio is already 16 kHz mono PCM) with afconvert normalising imports. Our own pyannote embedding path deliberately avoids file decoding by
-passing preloaded waveforms, so it has no torchcodec or FFmpeg library dependency.
+WhisperX's own load_audio shells out to ffmpeg, which once made ffmpeg a per-Mac
+prerequisite. The dependency is now removed: pipeline/audio_io.py reads audio into the
+float32 mono 16 kHz array WhisperX wants using the standard library (vault audio is
+already 16 kHz mono 16-bit PCM), and diarisation is handed the same preloaded array so
+pyannote never decodes a file either. Anything not already 16 kHz mono PCM (a different
+rate, more channels, another container from an import) is converted first with afconvert,
+which ships with macOS. So the shipped app needs no ffmpeg and the supervisor no longer
+patches Homebrew onto the backend's PATH. This mirrors the pyannote embedding path, which
+already passes preloaded waveforms and so has no torchcodec or FFmpeg library dependency.
 pyannote.audio 4 and current whisperx take token=, not use_auth_token=; the older name
 is silently ignored and downloads then fail on the gated repos.
 

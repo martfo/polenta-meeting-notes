@@ -117,12 +117,12 @@ final class BackendSupervisor: ObservableObject {
         if let backendDir = Self.backendDirectory() {
             backendProcess.currentDirectoryURL = URL(fileURLWithPath: backendDir)
         }
-        // A GUI app's children get the minimal system PATH, which misses
-        // Homebrew, and the transcription pipeline shells out to ffmpeg.
-        var environment = ProcessInfo.processInfo.environment
-        let path = environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        environment["PATH"] = path + ":/opt/homebrew/bin:/usr/local/bin"
-        backendProcess.environment = environment
+        // The backend no longer shells out to any tool that lives only under
+        // Homebrew: audio is decoded with the standard library, and the rare
+        // import that needs conversion uses /usr/bin/afconvert, which ships
+        // with macOS. So the child inherits the environment as-is and the
+        // shipped app needs no manual ffmpeg install.
+        backendProcess.environment = ProcessInfo.processInfo.environment
         do {
             try backendProcess.run()
             process = backendProcess

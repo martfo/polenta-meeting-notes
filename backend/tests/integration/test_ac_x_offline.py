@@ -46,7 +46,7 @@ class FixtureEngine:
     def __init__(self, segments_file):
         self.data = json.loads(segments_file.read_text())
 
-    def transcribe(self, audio_path, language):
+    def transcribe(self, audio_path, language, initial_prompt=None):
         return {"segments": [dict(s, speaker=None) for s in self.data["segments"]]}
 
     def align(self, result, audio_path, language, model_name):

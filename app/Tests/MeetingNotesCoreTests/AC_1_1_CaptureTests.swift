@@ -104,6 +104,49 @@ struct AC_1_1_CaptureTests {
         #expect(bits == 16)
     }
 
+    @Test("contiguous buffers accumulate without silence padding")
+    func test_place_contiguous_buffers() {
+        var samples: [Float] = []
+        // Two back-to-back 0.5 s blocks at 16 kHz, timed one after the other.
+        let block = [Float](repeating: 0.3, count: 8_000)
+        AudioMixer.place(block, into: &samples, atHostSeconds: 100.0, origin: 100.0)
+        AudioMixer.place(block, into: &samples, atHostSeconds: 100.5, origin: 100.0)
+        #expect(samples.count == 16_000)
+        #expect(samples.allSatisfy { $0 == 0.3 })
+    }
+
+    @Test("a stalled channel is padded with silence to keep the timeline")
+    func test_place_fills_gaps_with_silence() {
+        var samples: [Float] = []
+        let block = [Float](repeating: 0.4, count: 1_600)  // 0.1 s
+        // First block at the origin, then a two-second stall before the next.
+        AudioMixer.place(block, into: &samples, atHostSeconds: 50.0, origin: 50.0)
+        AudioMixer.place(block, into: &samples, atHostSeconds: 52.0, origin: 50.0)
+        #expect(samples.count == 32_000 + 1_600)  // 2 s gap plus the two blocks
+        #expect(samples[0] == 0.4)                 // first block
+        #expect(samples[1_599] == 0.4)             // end of the first block
+        #expect(samples[5_000] == 0)               // inside the silent gap
+        #expect(samples[32_000] == 0.4)            // second block lands at 2.0 s
+    }
+
+    @Test("both channels share one origin so equal times share an index")
+    func test_place_shared_origin_aligns_channels() {
+        // The microphone opens the recording; system audio arrives 1 s later.
+        let origin = 200.0
+        var mic: [Float] = []
+        var system: [Float] = []
+        AudioMixer.place([Float](repeating: 0.5, count: 1_600), into: &mic,
+                         atHostSeconds: 200.0, origin: origin)
+        AudioMixer.place([Float](repeating: 0.5, count: 1_600), into: &system,
+                         atHostSeconds: 201.0, origin: origin)
+        // The system channel is silent for the first second, so its speech sits
+        // at the same index it does in wall-clock time, not at index zero.
+        #expect(system.count == 16_000 + 1_600)
+        #expect(system[0] == 0)
+        #expect(system[16_000] == 0.5)
+        #expect(mic[0] == 0.5)
+    }
+
     @Test("AC-1.1-d input levels for microphone and system audio")
     func test_ac_1_1_d_input_levels() {
         let loud = [Float](repeating: 0.5, count: 1_000)

@@ -23,9 +23,13 @@ final class CaptureController: ObservableObject {
     nonisolated(unsafe) private let classifier = SourceClassifier()
 
     // Streams are resampled to 16 kHz as they arrive and accumulated as
-    // floats, so an hour of audio stays modest in memory.
+    // floats, so an hour of audio stays modest in memory. Each buffer is
+    // placed at its true time against `originHostSeconds`, a single origin
+    // shared by both channels (set by whichever buffer arrives first), so the
+    // microphone and system streams stay on one clock and their WAVs line up.
     nonisolated(unsafe) private var microphoneSamples: [Float] = []
     nonisolated(unsafe) private var systemSamples: [Float] = []
+    nonisolated(unsafe) private var originHostSeconds: Double?
     private let accumulationQueue = DispatchQueue(label: "capture.accumulate")
     private let ioQueue = DispatchQueue(label: "capture.io")
 
@@ -61,17 +65,18 @@ final class CaptureController: ObservableObject {
         accumulationQueue.sync {
             microphoneSamples = []
             systemSamples = []
+            originHostSeconds = nil
         }
 
         try tap.start()
         let tapRate = tap.sampleRate
-        tap.onBuffer = { [weak self] mono in
+        tap.onBuffer = { [weak self] mono, hostSeconds in
             guard let self else { return }
             let level = LevelMeter.level(of: mono)
             let resampled = AudioMixer.resample(mono, from: tapRate)
             self.accumulationQueue.async {
                 self.classifier.observeSystem(mono)
-                self.systemSamples.append(contentsOf: resampled)
+                self.place(resampled, into: &self.systemSamples, atHostSeconds: hostSeconds)
             }
             Task { @MainActor in self.systemLevel = level }
         }
@@ -93,18 +98,42 @@ final class CaptureController: ObservableObject {
             try engine.start()
             return
         }
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, when in
             guard let self, let channel = buffer.floatChannelData?[0] else { return }
             let mono = Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
             let level = LevelMeter.level(of: mono)
             let resampled = AudioMixer.resample(mono, from: inputRate)
+            let hostSeconds = Self.hostSeconds(when)
             self.accumulationQueue.async {
-                self.microphoneSamples.append(contentsOf: resampled)
+                self.place(resampled, into: &self.microphoneSamples, atHostSeconds: hostSeconds)
             }
             Task { @MainActor in self.microphoneLevel = level }
         }
         engine.prepare()
         try engine.start()
+    }
+
+    /// Places a resampled buffer into a channel on the shared capture clock,
+    /// initialising the origin from the first buffer of either channel. Called
+    /// on `accumulationQueue`, so the origin and the sample arrays are only
+    /// touched by one thread.
+    nonisolated private func place(
+        _ block: [Float], into samples: inout [Float], atHostSeconds hostSeconds: Double
+    ) {
+        let origin: Double
+        if let existing = originHostSeconds {
+            origin = existing
+        } else {
+            originHostSeconds = hostSeconds
+            origin = hostSeconds
+        }
+        AudioMixer.place(block, into: &samples, atHostSeconds: hostSeconds, origin: origin)
+    }
+
+    /// The host time of an AVAudioTime in seconds, falling back to now when the
+    /// engine does not stamp a valid host time.
+    nonisolated private static func hostSeconds(_ when: AVAudioTime) -> Double {
+        HostClock.seconds(when.isHostTimeValid ? when.hostTime : mach_absolute_time())
     }
 
     /// Switch the microphone mid-recording without stopping. System audio is

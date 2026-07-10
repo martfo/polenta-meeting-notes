@@ -4,6 +4,17 @@
 
 import Foundation
 
+/// Converts a mach host time (as carried by AVAudioTime and Core Audio's
+/// AudioTimeStamp) to seconds, so the microphone and system-audio callbacks
+/// can be placed on one shared clock.
+public enum HostClock {
+    public static func seconds(_ hostTime: UInt64) -> Double {
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        return Double(hostTime) * Double(info.numer) / Double(info.denom) / 1_000_000_000
+    }
+}
+
 public enum AudioMixer {
     public static let targetSampleRate = 16_000
 
@@ -24,6 +35,31 @@ public enum AudioMixer {
             output[i] = a + (b - a) * fraction
         }
         return output
+    }
+
+    /// Append a resampled buffer to a channel's running samples, placed at its
+    /// true time on a clock shared with the other channel.
+    ///
+    /// The microphone and the system-audio tap run on different device clocks
+    /// and deliver buffers independently; the tap in particular can stall while
+    /// nothing is playing. Appending each buffer positionally lets the two
+    /// channels drift apart, so a later merge by timestamp piles one speaker's
+    /// turns at the end. Instead every buffer carries the host time of its
+    /// first sample: the gap since the shared origin is filled with silence, so
+    /// sample index maps to the same wall-clock instant in both channels and
+    /// each channel's WAV stays full length. Buffers that would land in the past
+    /// (clock jitter) are appended contiguously rather than rewritten.
+    public static func place(
+        _ block: [Float], into samples: inout [Float],
+        atHostSeconds hostSeconds: Double, origin: Double,
+        sampleRate: Int = targetSampleRate
+    ) {
+        guard !block.isEmpty else { return }
+        let start = Int(((hostSeconds - origin) * Double(sampleRate)).rounded())
+        if start > samples.count {
+            samples.append(contentsOf: repeatElement(0, count: start - samples.count))
+        }
+        samples.append(contentsOf: block)
     }
 
     /// Average the two streams into one mono track at 16 kHz. The shorter
