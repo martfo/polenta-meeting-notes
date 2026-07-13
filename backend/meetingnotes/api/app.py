@@ -245,7 +245,10 @@ def create_app(state: AppState) -> FastAPI:
         elif transcript_path.exists():
             parts.append("Transcript extract:\n" + transcript_path.read_text()[:1500])
 
-        suggestion = suggest_folder(state.lm_client, fol.list_folders(conn), "\n\n".join(parts))
+        suggestion = suggest_folder(
+            state.lm_client, fol.list_folders(conn), "\n\n".join(parts),
+            folder_examples=fol.folder_examples(conn),
+        )
         if suggestion is None:
             return {"folder": None, "is_new": False}
         return {"folder": suggestion.folder, "is_new": suggestion.is_new}

@@ -83,42 +83,55 @@ struct RichMarkdownView: View {
 
     private var design: Font.Design { Appearance.design(from: fontDesign) }
 
+    /// A lazy stack renders long transcripts cheaply but breaks text selection
+    /// inside a ScrollView, so the summary (which the user wants to copy from)
+    /// uses a plain VStack and only the long transcript opts into lazy.
+    var lazy = false
+
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 10) {
-            ForEach(parseBlocks(text)) { block in
-                switch block {
-                case .section(let t):
-                    Text(LocalizedStringKey(t))
-                        .font(.system(size: baseFontSize + 4, weight: .semibold, design: design))
-                        .foregroundStyle(.primary)
-                        .padding(.top, 8)
-                case .subheading(let t):
-                    Text(LocalizedStringKey(t))
-                        .font(.system(size: baseFontSize + 1, weight: .semibold, design: design))
-                        .foregroundStyle(.primary)
-                        .padding(.top, 2)
-                case .bullet(let t, let indent):
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("•")
-                            .font(.system(size: baseFontSize, design: design))
-                            .foregroundStyle(.secondary)
-                        Text(LocalizedStringKey(t))
-                            .font(.system(size: baseFontSize, design: design))
-                            .foregroundStyle(.primary.opacity(0.85))
-                            .lineSpacing(4)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.leading, CGFloat(indent) * 18)
-                case .paragraph(let t):
+        Group {
+            if lazy {
+                LazyVStack(alignment: .leading, spacing: 10) { blocks }
+            } else {
+                VStack(alignment: .leading, spacing: 10) { blocks }
+            }
+        }
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var blocks: some View {
+        ForEach(parseBlocks(text)) { block in
+            switch block {
+            case .section(let t):
+                Text(LocalizedStringKey(t))
+                    .font(.system(size: baseFontSize + 4, weight: .semibold, design: design))
+                    .foregroundStyle(.primary)
+                    .padding(.top, 8)
+            case .subheading(let t):
+                Text(LocalizedStringKey(t))
+                    .font(.system(size: baseFontSize + 1, weight: .semibold, design: design))
+                    .foregroundStyle(.primary)
+                    .padding(.top, 2)
+            case .bullet(let t, let indent):
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("•")
+                        .font(.system(size: baseFontSize, design: design))
+                        .foregroundStyle(.secondary)
                     Text(LocalizedStringKey(t))
                         .font(.system(size: baseFontSize, design: design))
                         .foregroundStyle(.primary.opacity(0.85))
                         .lineSpacing(4)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(.leading, CGFloat(indent) * 18)
+            case .paragraph(let t):
+                Text(LocalizedStringKey(t))
+                    .font(.system(size: baseFontSize, design: design))
+                    .foregroundStyle(.primary.opacity(0.85))
+                    .lineSpacing(4)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .textSelection(.enabled)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

@@ -72,3 +72,33 @@ def test_ac_1_7_d_single_folder_membership(conn, vault):
     m.set_folder(conn, meeting_id, a)
     m.set_folder(conn, meeting_id, b)
     assert m.get_meeting(conn, meeting_id)["folder_id"] == b
+
+
+def test_ac_1_7_e_examples_learn_from_filed_titles(conn, vault):
+    """folder_examples returns the titles already filed in each folder, newest
+    first and capped per folder."""
+    clients = f.create_folder(conn, "Clients")
+    for i, title in enumerate(["Acme kickoff", "Acme review", "Globex sync"]):
+        mid = make_meeting(conn, vault, f"2026-07-0{i+1}_1000_m", title)
+        conn.execute(
+            "UPDATE meetings SET started_at = ? WHERE id = ?",
+            (f"2026-07-0{i+1}T10:00:00+00:00", mid))
+        m.set_folder(conn, mid, clients)
+    conn.commit()
+    examples = f.folder_examples(conn)
+    assert examples["Clients"][0] == "Globex sync"  # newest first
+    assert set(examples["Clients"]) == {"Acme kickoff", "Acme review", "Globex sync"}
+    assert f.folder_examples(conn, per_folder=1)["Clients"] == ["Globex sync"]
+
+
+def test_ac_1_7_f_suggestion_prompt_carries_example_titles(fixtures_dir):
+    """The example titles reach the model so it can match on past filing."""
+    ok = (fixtures_dir / "llm" / "folder_suggestion_ok.json").read_text()
+    client = FakeLMClient(ok)
+    suggest_folder(
+        client, EXISTING, "A meeting about the Acme rollout",
+        folder_examples={"Clients": ["Acme kickoff", "Acme review"]},
+    )
+    prompt = client.requests[0][0]["content"]
+    assert "Acme kickoff; Acme review" in prompt
+    assert "Suppliers: (no meetings filed yet)" in prompt

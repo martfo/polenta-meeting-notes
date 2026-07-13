@@ -31,6 +31,16 @@ public enum DateGrouping {
         order.firstIndex(of: bucket) ?? order.count
     }
 
+    /// The recording's wall-clock time as HH:mm, taken straight from the
+    /// stored ISO string so it is not shifted into another time zone, or nil
+    /// for a bare yyyy-MM-dd with no time.
+    public static func timeOfDay(_ startedAt: String) -> String? {
+        guard let tIndex = startedAt.firstIndex(of: "T") else { return nil }
+        let time = startedAt[startedAt.index(after: tIndex)...].prefix(5)
+        guard time.count == 5, time.dropFirst(2).first == ":" else { return nil }
+        return String(time)
+    }
+
     private static let isoFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]

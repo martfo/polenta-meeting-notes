@@ -13,13 +13,30 @@ from meetingnotes.llm.errors import LMStudioUnavailable
 SUGGESTION_PROMPT = (
     "Suggest which folder this meeting belongs in. Strongly prefer an existing "
     "folder from the list: choose one whenever the meeting plausibly fits it, "
-    "matching on the client, project, team, or topic. Only propose a new "
-    "folder when none of the existing ones fit, and then give it a short, "
-    "general name (a client, project, or team name), not the meeting's title. "
+    "matching on the client, project, team, or topic. To decide, look at how "
+    "meetings have already been filed: each folder below lists example titles "
+    "of meetings already in it, so match this meeting to the folder whose "
+    "existing titles are most like it. Only propose a new folder when none of "
+    "the existing ones fit, and then give it a short, general name (a client, "
+    "project, or team name), not the meeting's title. "
     "Reply with strict JSON and nothing else, in exactly this shape: "
     '{{"folder": "<name>", "is_new": <true or false>}}\n\n'
-    "Existing folders: {folders}\n\nMeeting:\n{context}"
+    "Existing folders and example titles already filed in each:\n{folders}\n\n"
+    "Meeting:\n{context}"
 )
+
+
+def _format_folders(existing_folders: list[str], examples: dict[str, list[str]]) -> str:
+    """Each folder on its own line with the example titles already filed in it,
+    so the model can match on the pattern of past filing, not just the name."""
+    lines = []
+    for name in existing_folders:
+        titles = examples.get(name) or []
+        if titles:
+            lines.append(f"- {name}: " + "; ".join(titles))
+        else:
+            lines.append(f"- {name}: (no meetings filed yet)")
+    return "\n".join(lines) if lines else "(none yet)"
 
 
 @dataclass
@@ -51,9 +68,11 @@ def parse_suggestion(reply: str, existing_folders: list[str]) -> FolderSuggestio
 
 def suggest_folder(
     client: LMStudioClient, existing_folders: list[str], meeting_context: str,
+    folder_examples: dict[str, list[str]] | None = None,
 ) -> FolderSuggestion | None:
     prompt = SUGGESTION_PROMPT.format(
-        folders=json.dumps(existing_folders), context=meeting_context
+        folders=_format_folders(existing_folders, folder_examples or {}),
+        context=meeting_context,
     )
     try:
         reply = client.chat([{"role": "user", "content": prompt}])

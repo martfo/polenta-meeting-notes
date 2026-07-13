@@ -63,8 +63,10 @@ public enum RuntimeLocation {
 ///     separately, remote-only diarisation), owner name, channel normalisation.
 /// 25: audio is decoded for transcription and diarisation with the standard
 ///     library instead of WhisperX's ffmpeg shell-out, so the shipped app
-///     needs no manual ffmpeg install; and Whisper is fed an initial prompt of
-///     the meeting's participant names and the configured glossary.
+///     needs no manual ffmpeg install; Whisper is fed an initial prompt of the
+///     meeting's participant names and the configured glossary; folder
+///     suggestions learn from the titles already filed in each folder; and the
+///     summary prompt no longer attributes points to placeholder labels.
 public let runtimeVersion = "25"
 
 public protocol RuntimeInstalling {

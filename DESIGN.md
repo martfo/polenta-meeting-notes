@@ -247,6 +247,10 @@ The model replies with strict JSON and nothing else:
 Parse defensively. A malformed reply, or a folder that is neither in the list nor marked new,
 falls back to no suggestion. It never blocks saving.
 
+The prompt lists each existing folder with a few of the meeting titles already filed in it
+(storage.folders.folder_examples), so the model matches a new meeting against how meetings have
+actually been categorised, not just the folder names.
+
 ## Speaker matching
 
 For each diarised cluster:

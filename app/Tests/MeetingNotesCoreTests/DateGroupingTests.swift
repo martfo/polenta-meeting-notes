@@ -41,4 +41,12 @@ struct DateGroupingTests {
         let now = date("2026-07-08T12:00:00Z")
         #expect(DateGrouping.bucket(for: "2026-07-08", now: now, calendar: calendar) == "Today")
     }
+
+    @Test("time of day is the recorded wall time, not shifted by zone")
+    func test_time_of_day() {
+        #expect(DateGrouping.timeOfDay("2026-07-02T14:30:00+01:00") == "14:30")
+        #expect(DateGrouping.timeOfDay("2026-07-02T09:05:00Z") == "09:05")
+        #expect(DateGrouping.timeOfDay("2026-07-02") == nil)
+        #expect(DateGrouping.timeOfDay("garbage") == nil)
+    }
 }

@@ -204,7 +204,7 @@ struct MeetingDetailScreen: View {
         switch tab {
         case "Transcript":
             if let transcript = detail.transcript {
-                ScrollView { RichMarkdownView(text: transcript).padding() }
+                ScrollView { RichMarkdownView(text: transcript, lazy: true).padding() }
             } else {
                 MarkdownPane(text: "No transcript yet. It appears when processing reaches that stage.")
             }

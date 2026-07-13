@@ -534,7 +534,7 @@ struct LibraryList: View {
             ForEach(dateBuckets, id: \.name) { bucket in
                 Section(bucket.name) {
                     ForEach(bucket.meetings) { meeting in
-                        meetingRow(meeting, showFolder: true).tag(meeting.id)
+                        meetingRow(meeting, showFolder: true, showTime: true).tag(meeting.id)
                     }
                 }
             }
@@ -551,11 +551,15 @@ struct LibraryList: View {
             })
     }
 
-    private func meetingRow(_ meeting: MeetingSummaryRow, showFolder: Bool = false) -> some View {
+    private func meetingRow(_ meeting: MeetingSummaryRow, showFolder: Bool = false,
+                            showTime: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(meeting.title).fontWeight(.medium)
             HStack(spacing: 6) {
                 Text(meeting.date)
+                if showTime, let time = DateGrouping.timeOfDay(meeting.started_at) {
+                    Text(time)
+                }
                 if showFolder, let folder = meeting.folder {
                     Text(folder)
                 } else if !meeting.attendees.isEmpty {

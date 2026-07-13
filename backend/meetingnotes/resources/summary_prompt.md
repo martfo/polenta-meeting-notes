@@ -4,7 +4,10 @@ Meeting date and time: {{meeting_datetime}}
 
 Base everything on what the transcript and notes actually say. Do not invent points,
 decisions, owners, dates, or facts that are not there. Where the transcript names a
-speaker, attribute points to that name.
+speaker, attribute points to that name. Never treat a placeholder or channel label as a
+person's name: "Me", "Unassigned", "Speaker 1", or a diarisation label like "SPEAKER_00"
+are not names. When the only label for a point is one of these, describe the point without
+attributing it to anyone rather than writing the label as if it were a person.
 
 Rules for dates:
 - Only convert relative dates such as "tomorrow", "Friday", or "next week" into calendar
@@ -38,8 +41,9 @@ what was said, not just the label.
 ## Next Steps
 
 One bullet per action. Start each bullet with the name of the person who owns it, then
-what they will do and any date that was given. If an owner was not stated, start the
-bullet with Unassigned.
+what they will do and any date that was given. If no real name owns the action, start the
+bullet with the action itself; do not invent an owner and do not use a placeholder label
+such as Unassigned, Me, or a speaker number.
 
 ## Decisions
 
