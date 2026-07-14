@@ -158,10 +158,16 @@ Added this session, still needing a real call:
   tap is dropping quiet remote audio — a capture-gain problem, not the merge (see below).
 - **Vocabulary prompt** confirm WhisperX accepts `asr_options={"initial_prompt": ...}` on the
   installed version and that reload-on-prompt-change works; check names/terms land in the text.
-- **Remote-channel capture quality** (feedback item): `system.wav` is already saved per
-  meeting — listen to one to tell capture problems from transcription problems in five minutes.
-  If remote speech is quiet/dropping at the tap, that is gain/format at capture, separate from
-  the merge and the vocabulary prompt.
+- **Remote-channel capture — root cause found and fixed, needs a real AirPods call to
+  confirm.** The tap read its sample rate once at start; when AirPods' mic engages, the output
+  drops to a lower rate mid-call, so every buffer was resampled ~2x too fast into chirp that
+  Whisper's VAD rejects — the remote side vanished and Whisper hallucinated "Thanks for
+  watching"-style segments from the near-silence. Proven by stretching the stand-up's
+  system.wav 2x: 228 real words appeared where 1x gave 2. Fixed with `SampleRateEstimator`
+  (per-buffer rate from sample-time vs host-time deltas, switches adopted immediately and
+  logged under `co.uk.designturbine.meetingnotes`). Verify: record a call on AirPods, check
+  system.wav transcribes and the log shows the rate switch. Old broken meetings are repairable
+  offline (de-gap, 2x stretch, halve timestamps, re-run transcription).
 
 ## User environment specifics
 

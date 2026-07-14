@@ -15,6 +15,57 @@ public enum HostClock {
     }
 }
 
+/// Measures the true delivery rate of an audio stream from its buffers'
+/// device sample time against the host clock.
+///
+/// The system-audio tap cannot trust a rate read once at start: when a
+/// Bluetooth headset's microphone is engaged by a call, the output device
+/// drops to a lower rate mid-stream, and resampling with the stale rate turns
+/// the captured speech into double-speed chirp that the transcriber's voice
+/// detection rejects — the remote side of the meeting silently vanishes.
+/// Sample time advances on the device's own clock, so the ratio of sample
+/// delta to host-time delta *is* the effective rate, whatever the device
+/// claims. Estimates are smoothed a little against host-time jitter and
+/// bounded to plausible audio rates.
+public struct SampleRateEstimator {
+    private var lastSampleTime: Double?
+    private var lastHostSeconds: Double?
+    private var estimate: Double
+
+    public init(initialRate: Double) {
+        self.estimate = initialRate
+    }
+
+    public var rate: Double { estimate }
+
+    /// Feed one buffer's timestamps; returns the current best rate estimate.
+    public mutating func update(sampleTime: Double, hostSeconds: Double) -> Double {
+        defer {
+            lastSampleTime = sampleTime
+            lastHostSeconds = hostSeconds
+        }
+        guard let lastSample = lastSampleTime, let lastHost = lastHostSeconds else {
+            return estimate
+        }
+        let hostDelta = hostSeconds - lastHost
+        let sampleDelta = sampleTime - lastSample
+        // Ignore nonsense: device restarts (sample time reset), stalled or
+        // duplicate timestamps, or a gap so long the ratio is meaningless.
+        guard hostDelta > 0.0005, hostDelta < 2.0, sampleDelta > 0 else { return estimate }
+        let measured = sampleDelta / hostDelta
+        guard measured >= 4_000, measured <= 384_000 else { return estimate }
+        if abs(measured - estimate) / estimate > 0.05 {
+            // A real rate switch: adopt it immediately rather than easing in,
+            // so at most one buffer is resampled with the stale rate.
+            estimate = measured
+        } else {
+            // Same rate, small jitter: smooth towards the measurement.
+            estimate += (measured - estimate) * 0.2
+        }
+        return estimate
+    }
+}
+
 public enum AudioMixer {
     public static let targetSampleRate = 16_000
 

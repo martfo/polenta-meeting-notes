@@ -69,11 +69,14 @@ final class CaptureController: ObservableObject {
         }
 
         try tap.start()
-        let tapRate = tap.sampleRate
-        tap.onBuffer = { [weak self] mono, hostSeconds in
+        // The delivery rate arrives per buffer, measured from the stream's own
+        // timestamps: a Bluetooth output dropping to telephony rates mid-call
+        // is resampled correctly instead of becoming double-speed chirp that
+        // the transcriber's voice detection rejects.
+        tap.onBuffer = { [weak self] mono, hostSeconds, rate in
             guard let self else { return }
             let level = LevelMeter.level(of: mono)
-            let resampled = AudioMixer.resample(mono, from: tapRate)
+            let resampled = AudioMixer.resample(mono, from: rate)
             self.accumulationQueue.async {
                 self.classifier.observeSystem(mono)
                 self.place(resampled, into: &self.systemSamples, atHostSeconds: hostSeconds)

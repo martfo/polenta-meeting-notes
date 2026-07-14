@@ -106,7 +106,13 @@ independently, so every buffer is placed at its own host time against a single o
 by both channels (see AudioMixer.place): a stall on either stream becomes silence rather than
 a shift, so sample index maps to the same instant in both WAVs and they are the same length.
 Without this the channels drift apart and merging by start time piles one speaker's turns at
-the end. The pipeline normalises and transcribes each channel separately, so quiet call audio
+the end. The tap's delivery rate is likewise never trusted from a single read at start: the
+aggregate device follows the output device, and a Bluetooth headset drops to telephony rates
+mid-recording when its microphone engages, which would mislabel the captured speech into
+double-speed chirp that the transcriber's voice detection rejects (the remote side of the
+meeting silently vanishes). SampleRateEstimator measures the true rate per buffer from the
+stream's own sample-time-versus-host-time deltas and the resampler uses that, so a rate
+switch is followed within a buffer. The pipeline normalises and transcribes each channel separately, so quiet call audio
 is not buried under the louder microphone and discarded by the transcriber's voice-activity
 threshold. The mic channel is labelled with the owner name (config.owner_name) and needs no
 diarisation; pyannote runs only on the system channel to separate the remote speakers; the

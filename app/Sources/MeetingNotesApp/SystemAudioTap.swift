@@ -33,11 +33,16 @@ final class SystemAudioTap {
     private var ioProcID: AudioDeviceIOProcID?
     private(set) var sampleRate: Double = 48_000
     private var buffersReceived = 0
+    private var rateEstimator = SampleRateEstimator(initialRate: 48_000)
+    private var lastLoggedRate: Double = 0
 
-    /// Mono float samples at `sampleRate`, with the host time (seconds) of the
-    /// buffer's first sample, delivered from the IO thread. The host time puts
-    /// the system channel on the same clock as the microphone.
-    var onBuffer: (([Float], Double) -> Void)?
+    /// Mono float samples with the host time (seconds) of the buffer's first
+    /// sample and the stream's measured delivery rate. The host time puts the
+    /// system channel on the same clock as the microphone; the per-buffer rate
+    /// follows mid-recording device rate switches (a Bluetooth headset dropping
+    /// to telephony rates when its microphone engages), which a rate read once
+    /// at start silently mislabels into double-speed chirp.
+    var onBuffer: (([Float], Double, Double) -> Void)?
 
     func start() throws {
         let description = TapFactory.makeGlobalTapDescription()
@@ -74,6 +79,15 @@ final class SystemAudioTap {
             AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &aggregate),
             "creating the capture device")
         aggregateID = aggregate
+
+        // The IO proc delivers at the aggregate device's rate, which follows
+        // its main sub-device (the output), not the tap's own format — and it
+        // can change mid-recording. Seed the estimator with the device's
+        // nominal rate and let the per-buffer timestamps track the truth.
+        let nominal = nominalSampleRate(of: aggregateID) ?? sampleRate
+        rateEstimator = SampleRateEstimator(initialRate: nominal)
+        lastLoggedRate = nominal
+        tapLog.info("aggregate nominal sample rate \(nominal)")
 
         var procID: AudioDeviceIOProcID?
         try check(
@@ -122,6 +136,16 @@ final class SystemAudioTap {
         // channel still shares the microphone's clock.
         let hostValid = inputTime.mFlags.contains(.hostTimeValid)
         let hostSeconds = HostClock.seconds(hostValid ? inputTime.mHostTime : mach_absolute_time())
+        // Sample time against host time measures the true delivery rate, so a
+        // mid-recording device rate switch is followed instead of mislabelled.
+        var rate = rateEstimator.rate
+        if hostValid, inputTime.mFlags.contains(.sampleTimeValid) {
+            rate = rateEstimator.update(sampleTime: inputTime.mSampleTime, hostSeconds: hostSeconds)
+        }
+        if abs(rate - lastLoggedRate) / max(lastLoggedRate, 1) > 0.05 {
+            tapLog.warning("system audio delivery rate changed \(self.lastLoggedRate) -> \(rate)")
+            lastLoggedRate = rate
+        }
         for buffer in buffers {
             guard let data = buffer.mData else { continue }
             let channels = max(1, Int(buffer.mNumberChannels))
@@ -137,8 +161,19 @@ final class SystemAudioTap {
                 }
                 mono[frame] = sum / Float(channels)
             }
-            onBuffer(mono, hostSeconds)
+            onBuffer(mono, hostSeconds, rate)
         }
+    }
+
+    private func nominalSampleRate(of deviceID: AudioObjectID) -> Double? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var rate = Float64(0)
+        var size = UInt32(MemoryLayout<Float64>.size)
+        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &rate)
+        return status == noErr && rate > 0 ? rate : nil
     }
 
     private func tapFormat() throws -> AudioStreamBasicDescription {

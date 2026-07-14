@@ -147,6 +147,40 @@ struct AC_1_1_CaptureTests {
         #expect(mic[0] == 0.5)
     }
 
+    @Test("a mid-recording device rate switch is adopted within a buffer")
+    func test_rate_estimator_follows_rate_switch() {
+        var estimator = SampleRateEstimator(initialRate: 48_000)
+        // 10 ms buffers at a true 48 kHz: 480 samples per 0.01 s.
+        var sampleTime = 0.0
+        for i in 0...5 {
+            _ = estimator.update(sampleTime: sampleTime, hostSeconds: Double(i) * 0.01)
+            sampleTime += 480
+        }
+        #expect(abs(estimator.rate - 48_000) < 500)
+        // The output drops to 24 kHz (Bluetooth microphone engaged): the same
+        // 10 ms now advances sample time by only 240.
+        var host = 0.06
+        for _ in 0..<3 {
+            sampleTime += 240
+            host += 0.01
+            _ = estimator.update(sampleTime: sampleTime, hostSeconds: host)
+        }
+        #expect(abs(estimator.rate - 24_000) < 500, "the new rate is adopted, not smoothed away")
+    }
+
+    @Test("nonsense timestamps do not corrupt the rate estimate")
+    func test_rate_estimator_rejects_nonsense() {
+        var estimator = SampleRateEstimator(initialRate: 48_000)
+        _ = estimator.update(sampleTime: 0, hostSeconds: 0)
+        _ = estimator.update(sampleTime: 480, hostSeconds: 0.01)
+        let before = estimator.rate
+        // A device restart resets sample time backwards; a duplicate callback
+        // repeats the same host time. Neither should move the estimate.
+        _ = estimator.update(sampleTime: 0, hostSeconds: 0.02)
+        _ = estimator.update(sampleTime: 480, hostSeconds: 0.02)
+        #expect(estimator.rate == before)
+    }
+
     @Test("AC-1.1-d input levels for microphone and system audio")
     func test_ac_1_1_d_input_levels() {
         let loud = [Float](repeating: 0.5, count: 1_000)
