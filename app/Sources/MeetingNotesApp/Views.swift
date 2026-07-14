@@ -483,6 +483,10 @@ struct LibraryList: View {
     // Folders start expanded; a folder the user collapses is remembered here.
     @State private var collapsed: Set<String> = []
     @AppStorage("libraryGrouping") private var grouping = "folders"
+    // Right-click actions mirror the meeting view's three-dots menu, with the
+    // same confirmations before anything destructive or edit-clobbering.
+    @State private var pendingDelete: MeetingSummaryRow?
+    @State private var pendingRegenerateID: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -497,6 +501,36 @@ struct LibraryList: View {
             if grouping == "date" { dateList } else { folderList }
         }
         .navigationSplitViewColumnWidth(min: 240, ideal: 300)
+        .alert("Delete this meeting?", isPresented: Binding(
+            get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {
+            Button("Delete", role: .destructive) {
+                guard let meeting = pendingDelete else { return }
+                Task {
+                    try? await model.client.deleteMeeting(meeting.id)
+                    if model.selectedMeetingID == meeting.id { model.selectedMeetingID = nil }
+                    await model.refreshLibrary()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The recording, transcript, summary, and notes are removed "
+                 + "from the vault. Voices you have named stay remembered.")
+        }
+        .alert("Regenerate the summary?", isPresented: Binding(
+            get: { pendingRegenerateID != nil }, set: { if !$0 { pendingRegenerateID = nil } })) {
+            Button("Regenerate") {
+                guard let id = pendingRegenerateID else { return }
+                Task {
+                    try? await model.client.regenerateSummary(id)
+                    await model.refreshLibrary()
+                }
+            }
+            Button("Keep my edits", role: .cancel) {}
+        } message: {
+            Text("You have edited this summary by hand. Regenerating replaces "
+                 + "your edits with a fresh summary written from the transcript "
+                 + "and the current notes.")
+        }
     }
 
     private var folderList: some View {
@@ -570,6 +604,39 @@ struct LibraryList: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+        }
+        .contextMenu { rowMenu(meeting) }
+    }
+
+    /// The same actions as the meeting view's three-dots menu. The row does
+    /// not carry the vault path or the edited flag, so those are fetched on
+    /// demand; the confirmations match the detail screen's exactly.
+    @ViewBuilder
+    private func rowMenu(_ meeting: MeetingSummaryRow) -> some View {
+        Button("Reveal in Finder") {
+            Task {
+                if let detail = try? await model.client.meeting(meeting.id) {
+                    model.revealInFinder(path: detail.reveal_path)
+                }
+            }
+        }
+        Button("Regenerate summary") {
+            Task {
+                guard let detail = try? await model.client.meeting(meeting.id) else { return }
+                if detail.summary_edited == 1 {
+                    pendingRegenerateID = meeting.id
+                } else {
+                    try? await model.client.regenerateSummary(meeting.id)
+                    await model.refreshLibrary()
+                }
+            }
+        }
+        // No transcript to summarise yet while the recording is still being
+        // captured or transcribed; the detail menu disables on the same rule.
+        .disabled(["recording", "queued", "transcribing"].contains(meeting.processing_status))
+        Divider()
+        Button("Delete meeting", role: .destructive) {
+            pendingDelete = meeting
         }
     }
 }
