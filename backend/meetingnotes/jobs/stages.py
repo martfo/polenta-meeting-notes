@@ -156,6 +156,10 @@ def build_stages(
     def enrich(meeting_id: str) -> None:
         if not _has_speech(meeting_id):
             return
+        # A re-run (retry over repaired audio) diarises fresh clusters; the
+        # previous run's assignments claim the same labels and would fail the
+        # UNIQUE constraint, so they are replaced, not accumulated.
+        asg.clear_meeting(conn, meeting_id)
 
         if is_dual(meeting_id):
             segments = load_segments(segments_path(meeting_id)).segments

@@ -70,7 +70,10 @@ public enum RuntimeLocation {
 /// 26: per-channel normalisation targets speech loudness (voiced RMS) with a
 ///     limiter instead of scaling by peak, so the quiet remote channel is
 ///     actually lifted above the transcriber's voice-activity threshold.
-public let runtimeVersion = "26"
+/// 27: reprocessing a meeting replaces its speaker assignments instead of
+///     failing their UNIQUE constraint, so Retry can re-run a ready meeting
+///     end to end (needed to reprocess repaired audio).
+public let runtimeVersion = "27"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

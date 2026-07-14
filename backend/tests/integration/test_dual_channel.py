@@ -135,6 +135,17 @@ def test_dual_channel_pipeline_merges_owner_and_remote(conn, vault):
         "SELECT display_name FROM meeting_speakers WHERE meeting_id = ?", (meeting_id,)).fetchall()]
     assert "Martin" in speakers
 
+    # Reprocessing the same meeting (a retry over repaired audio) must replace
+    # the speaker assignments, not trip their UNIQUE constraint and fail enrich.
+    before = conn.execute(
+        "SELECT count(*) FROM meeting_speakers WHERE meeting_id = ?", (meeting_id,)).fetchone()[0]
+    stages["transcribe"](meeting_id)
+    stages["diarise"](meeting_id)
+    stages["enrich"](meeting_id)
+    after = conn.execute(
+        "SELECT count(*) FROM meeting_speakers WHERE meeting_id = ?", (meeting_id,)).fetchone()[0]
+    assert after == before, "re-running the pipeline replaces assignments rather than accumulating"
+
 
 def test_single_channel_still_works(conn, vault, fixtures_dir):
     """A meeting with only audio.wav (an import) uses the single-channel path."""

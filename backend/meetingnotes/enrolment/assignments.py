@@ -29,6 +29,18 @@ def record_cluster(
     return cur.lastrowid
 
 
+def clear_meeting(conn: sqlite3.Connection, meeting_id: str) -> None:
+    """Remove a meeting's speaker assignments so its pipeline can run again.
+
+    Reprocessing (a retry over repaired audio, say) diarises fresh clusters
+    whose labels the old rows already claim: without clearing, record_cluster
+    hits the meeting_id/diarised_label UNIQUE constraint and enrich fails. The
+    old rows describe stale clusters anyway. Voiceprints already taught to the
+    gallery are kept; only the per-meeting label table is reset."""
+    conn.execute("DELETE FROM meeting_speakers WHERE meeting_id = ?", (meeting_id,))
+    conn.commit()
+
+
 def get_assignment(conn: sqlite3.Connection, assignment_id: int) -> sqlite3.Row:
     row = conn.execute("SELECT * FROM meeting_speakers WHERE id = ?", (assignment_id,)).fetchone()
     if row is None:
