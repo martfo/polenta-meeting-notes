@@ -33,6 +33,32 @@ enum KeychainTokenStore {
         process.waitUntilExit()
         return process.terminationStatus == 0
     }
+
+    /// The stored token, so first-run (which re-appears whenever the runtime
+    /// version bumps) can pre-fill the field instead of making the user paste
+    /// it again. Read through the same tool that wrote it, matching how the
+    /// backend reads it. Returns nil when nothing is stored yet.
+    static func load() -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = [
+            "find-generic-password", "-s", service, "-a", account, "-w",
+        ]
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        process.standardError = Pipe()
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        let token = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (token?.isEmpty ?? true) ? nil : token
+    }
 }
 
 struct TokenCheck: Identifiable {
@@ -133,6 +159,7 @@ final class FirstRunModel: ObservableObject {
 struct FirstRunView: View {
     @StateObject private var model = FirstRunModel()
     @State private var token = ""
+    @State private var tokenPrefilled = false
     let onFinished: () -> Void
 
     var body: some View {
@@ -171,6 +198,20 @@ struct FirstRunView: View {
                             }
                             .disabled(token.trimmingCharacters(in: .whitespaces).isEmpty || model.checkingToken)
                             if model.checkingToken { ProgressView().controlSize(.small) }
+                        }
+                        .onAppear {
+                            // Re-provisioning shows this screen again; the token
+                            // is still in the Keychain, so fill it in and the
+                            // user only has to press Store and check.
+                            if token.isEmpty, let saved = KeychainTokenStore.load() {
+                                token = saved
+                                tokenPrefilled = true
+                            }
+                        }
+                        if tokenPrefilled {
+                            Text("Filled in from your saved token. Press Store and check to confirm it.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
 
                         ForEach(model.tokenChecks) { check in
