@@ -41,7 +41,7 @@ struct MeetingAttendee: Codable, Hashable {
     let email: String?
 }
 
-struct MeetingDetail: Codable {
+struct MeetingDetail: Codable, Equatable {
     let id: String
     let title: String
     let folder: String?

@@ -106,13 +106,23 @@ struct MeetingDetailScreen: View {
             chatDrawerOpen = false
             keepEditsChosen = false
             await reload()
-            // Keep the open meeting fresh while it is being processed, so a
-            // stage change or failure shows without a click.
-            while !Task.isCancelled {
+            // Keep the open meeting fresh while it is still being processed, so
+            // a stage change or failure shows without a click. Once it has
+            // settled there is nothing to poll for, and stopping lets the summary
+            // stay still enough to select and copy.
+            while !Task.isCancelled, !isSettled {
                 try? await Task.sleep(for: .seconds(2))
                 await reload(keepingDraft: true)
             }
         }
+    }
+
+    /// True when the meeting has finished processing (or failed) and its summary
+    /// is no longer pending, so there is no further live update to wait for.
+    private var isSettled: Bool {
+        guard let detail else { return false }
+        if detail.processing_status == "failed" { return true }
+        return detail.processing_status == "ready" && detail.summary_status != "pending"
     }
 
     // MARK: - Header
@@ -382,7 +392,10 @@ struct MeetingDetailScreen: View {
 
     private func reload(keepingDraft: Bool = false) async {
         guard let fresh = try? await model.client.meeting(meetingID) else { return }
-        detail = fresh
+        // Only publish a genuine change. The open meeting is polled every couple
+        // of seconds; reassigning an identical detail would re-render the summary
+        // and clear any text the user is selecting mid-drag.
+        if detail != fresh { detail = fresh }
         if !keepingDraft || notesDraft.isEmpty {
             notesDraft = fresh.notes
             lastSavedNotes = fresh.notes
