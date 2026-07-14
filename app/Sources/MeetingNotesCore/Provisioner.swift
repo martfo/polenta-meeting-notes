@@ -73,7 +73,10 @@ public enum RuntimeLocation {
 /// 27: reprocessing a meeting replaces its speaker assignments instead of
 ///     failing their UNIQUE constraint, so Retry can re-run a ready meeting
 ///     end to end (needed to reprocess repaired audio).
-public let runtimeVersion = "27"
+/// 28: the Granola import maps the real export's columns (document_created,
+///     workspace_name) and lands the user's typed notes column in notes.md,
+///     kept separate from the AI summary.
+public let runtimeVersion = "28"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

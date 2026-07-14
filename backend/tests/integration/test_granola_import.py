@@ -91,6 +91,82 @@ def test_import_creates_meetings_folders_and_files(conn, vault):
     assert m.get_meeting(conn, review_id)["summary_status"] == "ready"
 
 
+REAL_HEADERS = ["document_id", "user_email", "document_title", "workspace_name",
+                "document_created", "summary", "notes", "transcript"]
+
+
+def test_real_export_columns_all_map():
+    """The columns of an actual Granola export (Settings, Profile, Generate
+    CSV) map completely: the AI summary and the user's own notes stay
+    separate, the created date and workspace are recognised, and only the
+    exporting account's email is ignored."""
+    mapping, unmapped = map_columns(REAL_HEADERS)
+    assert mapping["granola_id"] == "document_id"
+    assert mapping["title"] == "document_title"
+    assert mapping["folder"] == "workspace_name"
+    assert mapping["date"] == "document_created"
+    assert mapping["summary"] == "summary"
+    assert mapping["notes"] == "notes"
+    assert mapping["transcript"] == "transcript"
+    assert unmapped == ["user_email"]
+
+
+def test_real_export_row_imports_date_folder_and_notes(conn, vault):
+    """A row shaped like the real export lands with its true date and time,
+    its workspace as the folder, and the typed notes in notes.md."""
+    from meetingnotes.notes.notes import read_notes
+
+    text = _csv(
+        [{
+            "document_id": "3f2a77c0-aaaa-bbbb-cccc-1234567890ab",
+            "user_email": "martin@designturbine.co.uk",
+            "document_title": "CET daily stand-up",
+            "workspace_name": "CET",
+            "document_created": "2026-06-12T09:30:00.000Z",
+            "summary": "## Core items discussed\n\nEnvironments agreed.",
+            "notes": "- chase Nisha about the design doc\n- Connor back Wednesday",
+            "transcript": "Jake: Morning all.\nMartin: Morning.",
+        }],
+        REAL_HEADERS,
+    )
+
+    report = import_granola_csv(conn, vault, text)
+
+    assert report.imported == 1 and report.failed == 0
+    assert report.folders_created == ["CET"]
+    meeting_id = "granola-3f2a77c0aaaabbbb"
+    row = m.get_meeting(conn, meeting_id)
+    assert row["started_at"].startswith("2026-06-12T09:30:00")
+    front, body = read_meeting_md(vault.meeting_md_path(meeting_id))
+    assert front["date"] == "2026-06-12"
+    assert front["start_time"] == "09:30"
+    assert "Environments agreed." in body
+    assert "chase Nisha" in read_notes(vault, meeting_id)
+    assert "Morning all." in vault.transcript_path(meeting_id).read_text()
+
+
+def test_notes_only_column_still_falls_back_to_summary():
+    """An export with a notes column but no summary keeps the old behaviour:
+    the notes column serves as the summary."""
+    mapping, _ = map_columns(["Title", "Notes", "Transcript"])
+    assert mapping["summary"] == "Notes"
+    assert "notes" not in mapping
+
+
+def test_notes_only_row_is_imported_not_empty(conn, vault):
+    """A row carrying only typed notes is still a record, not an empty row."""
+    text = _csv(
+        [{
+            "document_id": "x1", "user_email": "", "document_title": "",
+            "workspace_name": "", "document_created": "2026-06-13T08:00:00.000Z",
+            "summary": "", "notes": "Remember to invoice.", "transcript": "",
+        }],
+        REAL_HEADERS,
+    )
+    report = import_granola_csv(conn, vault, text)
+    assert report.imported == 1 and report.empty == 0
+
+
 def test_import_is_idempotent(conn, vault):
     text = _csv(
         [{"Title": "Once", "Summary": "S", "Transcript": "A: hi", "id": "doc-1"}],

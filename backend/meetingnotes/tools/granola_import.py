@@ -35,15 +35,26 @@ from meetingnotes.storage.transcript import render_transcript
 from meetingnotes.storage.vault import Vault
 
 # Candidate header names for each field, compared after normalising to
-# lowercase alphanumerics. The first CSV column that matches wins.
+# lowercase alphanumerics. The first CSV column that matches wins. Fields are
+# claimed in declaration order, so with both a summary and a notes column the
+# summary field takes "summary" and the notes field takes "notes" (the user's
+# own typed notes, kept separate in Granola exactly as they are here); with
+# only a "notes" column, the summary falls back to it as before. The real
+# export's columns are document_id, user_email, document_title,
+# workspace_name, document_created, summary, notes, transcript; user_email is
+# the exporting account, the same on every row, and is deliberately ignored.
 FIELD_CANDIDATES: dict[str, set[str]] = {
     "title": {"title", "name", "meetingtitle", "notetitle", "documenttitle", "subject"},
     "summary": {"summary", "notesummary", "notes", "ainotes", "aisummary",
                 "enhancednotes", "enhancednote", "content"},
+    "notes": {"notes", "mynotes", "usernotes", "typednotes", "personalnotes",
+              "manualnotes"},
     "transcript": {"transcript", "fulltranscript", "transcripttext", "rawtranscript"},
     "date": {"date", "created", "createdat", "meetingdate", "timestamp",
-             "datetime", "createddate", "starttime", "startedat"},
-    "folder": {"folder", "folders", "workspace", "workspaces", "list", "lists"},
+             "datetime", "createddate", "documentcreated", "datecreated",
+             "starttime", "startedat"},
+    "folder": {"folder", "folders", "workspace", "workspaces", "workspacename",
+               "list", "lists"},
     "attendees": {"attendees", "participants", "people", "attendeelist", "guests"},
     "granola_id": {"id", "noteid", "documentid", "uuid", "docid"},
 }
@@ -205,11 +216,12 @@ def import_granola_csv(
         row_number = index + 1
         raw_title = (row.get(mapping.get("title", ""), "") or "").strip()
         summary = (row.get(mapping.get("summary", ""), "") or "").strip()
+        notes_text = (row.get(mapping.get("notes", ""), "") or "").strip()
         transcript_text = (row.get(mapping.get("transcript", ""), "") or "").strip()
 
         # A wholly empty row carries nothing to import; account for it, do not
-        # create a blank meeting.
-        if not raw_title and not summary and not transcript_text:
+        # create a blank meeting. A row with only typed notes is still a record.
+        if not raw_title and not summary and not notes_text and not transcript_text:
             report.empty += 1
             continue
 
@@ -229,7 +241,8 @@ def import_granola_csv(
             attendees = _split_attendees(row.get(mapping.get("attendees", "")))
             folder_name = (row.get(mapping.get("folder", ""), "") or "").strip()
 
-            _write_meeting(conn, vault, meeting_id, title, date, summary, segments, attendees)
+            _write_meeting(conn, vault, meeting_id, title, date, summary, segments,
+                           attendees, notes_text)
 
             if folder_name:
                 if folder_name not in existing_folders:
@@ -267,6 +280,7 @@ def _meeting_exists(conn: sqlite3.Connection, meeting_id: str) -> bool:
 def _write_meeting(
     conn: sqlite3.Connection, vault: Vault, meeting_id: str, title: str,
     date: datetime, summary: str, segments: list[Segment], attendees: list[str],
+    notes_text: str = "",
 ) -> None:
     meeting_dir = vault.meeting_dir(meeting_id)
     meeting_dir.mkdir(parents=True, exist_ok=True)
@@ -274,6 +288,14 @@ def _write_meeting(
     if segments:
         save_segments(SegmentList(segments=segments), meeting_dir / "segments.json")
         vault.transcript_path(meeting_id).write_text(render_transcript(segments))
+
+    # The user's own typed notes travel separately from the AI summary in the
+    # export, and land in notes.md here, where they feed chat and any later
+    # re-summarisation exactly like notes typed in the app.
+    if notes_text:
+        from meetingnotes.notes.notes import write_notes
+
+        write_notes(vault, meeting_id, notes_text)
 
     summary_status = "ready" if summary else "pending"
     m.create_meeting(
