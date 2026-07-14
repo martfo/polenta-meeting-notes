@@ -67,7 +67,10 @@ public enum RuntimeLocation {
 ///     meeting's participant names and the configured glossary; folder
 ///     suggestions learn from the titles already filed in each folder; and the
 ///     summary prompt no longer attributes points to placeholder labels.
-public let runtimeVersion = "25"
+/// 26: per-channel normalisation targets speech loudness (voiced RMS) with a
+///     limiter instead of scaling by peak, so the quiet remote channel is
+///     actually lifted above the transcriber's voice-activity threshold.
+public let runtimeVersion = "26"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

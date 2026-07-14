@@ -31,14 +31,33 @@ def test_merge_by_time_interleaves_channels():
     assert [s.channel for s in merged] == ["mic", "system", "mic"]
 
 
+def _rms(path):
+    with wave.open(str(path), "rb") as w:
+        x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
+    return float(np.sqrt(np.mean(x * x))) if x.size else 0.0
+
+
 def test_normalise_lifts_quiet_audio(tmp_path):
-    """A quiet-but-real channel is boosted; a silent one is left alone."""
+    """A quiet-but-real channel is brought up towards the target speech level,
+    even when a loud transient sits near full scale (peak scaling would barely
+    move it); a peak transient does not stop the lift."""
     quiet = tmp_path / "quiet.wav"
-    _write_wav(quiet, (np.sin(np.linspace(0, 2000, 16000)) * 400))  # peak ~0.012
+    speech = np.sin(np.linspace(0, 2000, 16000)) * 1300  # quiet call speech, ~0.04 peak
+    speech[8000] = 30000  # one loud transient near full scale
+    _write_wav(quiet, speech)
+    before = _rms(quiet)
     out = normalise_wav(quiet, tmp_path / "norm.wav")
-    with wave.open(str(out), "rb") as w:
-        peak = np.max(np.abs(np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16))) / 32768.0
-    assert peak > 0.8, "quiet speech is normalised up towards full scale"
+    after = _rms(out)
+    assert after > before * 3, "quiet speech is lifted despite the loud transient"
+    assert after > 0.05, "brought up towards the target speech RMS"
+
+
+def test_normalise_leaves_silence_alone(tmp_path):
+    """A near-silent channel is not amplified into noise."""
+    silent = tmp_path / "silent.wav"
+    _write_wav(silent, np.zeros(16000))
+    out = normalise_wav(silent, tmp_path / "norm.wav")
+    assert _rms(out) < 0.001
 
 
 class ChannelEngine:
