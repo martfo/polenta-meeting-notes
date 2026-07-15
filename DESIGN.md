@@ -19,8 +19,11 @@ back-to-back meetings queue behind one another while a new recording can always 
 - App: Swift 5.9 or later, SwiftUI. Tests in Swift Testing, XCTest where it does not fit.
 - Backend: Python 3.11. FastAPI, uvicorn, pydantic v2. Tests in pytest, with a marker that
   separates the fast gate from the slow pipeline tier.
-- Transcription: WhisperX, faster-whisper backend on CPU, Whisper large-v3, English wav2vec2
-  alignment. Diarisation via pyannote speaker-diarisation-community-1.
+- Transcription: WhisperX, faster-whisper backend on CPU, distil-large-v3 (an English-only
+  distillation of large-v3, ~2x faster on CPU for negligible English accuracy loss), English
+  wav2vec2 alignment. Diarisation via pyannote speaker-diarisation-community-1. faster-whisper's
+  CTranslate2 backend supports only CPU and CUDA (no Apple Metal/GPU), so transcription is
+  CPU-bound on Apple Silicon; a future MLX-based engine could move it to the GPU.
 - Embeddings: bge-m3, run in the backend, vectors L2 normalised.
 - Vector store: LanceDB. Index: SQLite through the standard library with a small migration
   runner. No server.

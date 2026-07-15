@@ -1,10 +1,17 @@
-"""The real WhisperX engine: Whisper large-v3 on the faster-whisper CPU
-backend, English wav2vec2 alignment, and pyannote diarisation.
+"""The real WhisperX engine: distilled Whisper large-v3 on the faster-whisper
+CPU backend, English wav2vec2 alignment, and pyannote diarisation.
 
 Imported lazily so the fast gate never needs the heavy dependencies. Models
 are downloaded once during first-run setup and cached; after that everything
 here runs offline. pyannote needs the Hugging Face token from the Keychain
 for that first download only.
+
+The transcription model is distil-large-v3, an English-only distillation of
+large-v3 that runs about twice as fast on CPU for a negligible accuracy cost
+on English speech. faster-whisper's CTranslate2 backend has no Apple-GPU
+(Metal) support, only CPU and CUDA, so on this Mac transcription is CPU-bound
+whatever the hardware; the model choice is where the CPU speed is won. A later
+change can move transcription to an Apple-GPU engine (MLX) for a larger win.
 """
 
 from __future__ import annotations
@@ -14,7 +21,8 @@ from typing import Any
 
 from meetingnotes.pipeline.audio_io import load_audio_16k_mono
 
-WHISPER_MODEL = "large-v3"
+# distil-large-v3 -> Systran/faster-distil-whisper-large-v3 (English only).
+WHISPER_MODEL = "distil-large-v3"
 DIARISATION_MODEL = "pyannote/speaker-diarization-community-1"
 DEVICE = "cpu"
 COMPUTE_TYPE = "int8"

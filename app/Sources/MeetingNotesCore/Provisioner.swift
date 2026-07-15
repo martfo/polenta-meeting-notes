@@ -76,7 +76,9 @@ public enum RuntimeLocation {
 /// 28: the Granola import maps the real export's columns (document_created,
 ///     workspace_name) and lands the user's typed notes column in notes.md,
 ///     kept separate from the AI summary.
-public let runtimeVersion = "28"
+/// 29: transcription uses distil-large-v3 instead of large-v3 (~2x faster on
+///     CPU, English only); the new model downloads once on next online use.
+public let runtimeVersion = "29"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.
