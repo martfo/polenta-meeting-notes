@@ -33,11 +33,18 @@ def _load_waveform(audio_path: Path) -> dict:
 
 class PyannoteSpeakerEmbedder:
     def __init__(self, hf_token: str | None = None):
+        import torch
         from pyannote.audio import Inference, Model
+
+        from meetingnotes.pipeline.device import pipeline_device
 
         # pyannote.audio 4 takes token=, not the older use_auth_token=.
         model = Model.from_pretrained(EMBEDDING_MODEL, token=hf_token)
-        self._inference = Inference(model, window="whole")
+        # Runs on the Apple GPU where available; unimplemented ops fall back to
+        # CPU (see device.py). Embedding is lighter than diarisation but shares
+        # the same model family, so it moves with it.
+        self._inference = Inference(
+            model, window="whole", device=torch.device(pipeline_device()))
 
     def embed_span(self, audio_path: Path, start: float, end: float) -> np.ndarray:
         from pyannote.core import Segment as Span

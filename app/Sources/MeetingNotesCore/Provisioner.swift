@@ -78,7 +78,10 @@ public enum RuntimeLocation {
 ///     kept separate from the AI summary.
 /// 29: transcription uses distil-large-v3 instead of large-v3 (~2x faster on
 ///     CPU, English only); the new model downloads once on next online use.
-public let runtimeVersion = "29"
+/// 30: the PyTorch pipeline stages (pyannote diarisation and embedding,
+///     wav2vec2 alignment) run on the Apple GPU via Metal (MPS) where
+///     available, with a CPU fallback; diarisation is ~20x faster.
+public let runtimeVersion = "30"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

@@ -20,11 +20,14 @@ from pathlib import Path
 from typing import Any
 
 from meetingnotes.pipeline.audio_io import load_audio_16k_mono
+from meetingnotes.pipeline.device import pipeline_device
 
 # distil-large-v3 -> Systran/faster-distil-whisper-large-v3 (English only).
 WHISPER_MODEL = "distil-large-v3"
 DIARISATION_MODEL = "pyannote/speaker-diarization-community-1"
-DEVICE = "cpu"
+# Transcription (CTranslate2) has no Metal backend, so it stays on CPU; the
+# PyTorch stages below run on the Apple GPU where available (see device.py).
+TRANSCRIBE_DEVICE = "cpu"
 COMPUTE_TYPE = "int8"
 
 
@@ -35,6 +38,7 @@ class WhisperXEngine:
         self._whisperx = whisperx
         self._hf_token = hf_token
         self._batch_size = batch_size
+        self._device = pipeline_device()
         self._asr = None
         self._loaded_prompt: str | None = None
         self._align_model = None
@@ -51,8 +55,8 @@ class WhisperXEngine:
         if self._asr is None or initial_prompt != self._loaded_prompt:
             asr_options = {"initial_prompt": initial_prompt} if initial_prompt else None
             self._asr = self._whisperx.load_model(
-                WHISPER_MODEL, DEVICE, compute_type=COMPUTE_TYPE, language=language,
-                asr_options=asr_options,
+                WHISPER_MODEL, TRANSCRIBE_DEVICE, compute_type=COMPUTE_TYPE,
+                language=language, asr_options=asr_options,
             )
             self._loaded_prompt = initial_prompt
         audio = load_audio_16k_mono(audio_path)
@@ -61,12 +65,12 @@ class WhisperXEngine:
     def align(self, result: dict, audio_path: Path, language: str, model_name: str) -> dict:
         if self._align_model is None:
             self._align_model, self._align_metadata = self._whisperx.load_align_model(
-                language_code=language, device=DEVICE, model_name=model_name
+                language_code=language, device=self._device, model_name=model_name
             )
         audio = load_audio_16k_mono(audio_path)
         return self._whisperx.align(
-            result["segments"], self._align_model, self._align_metadata, audio, DEVICE,
-            return_char_alignments=False,
+            result["segments"], self._align_model, self._align_metadata, audio,
+            self._device, return_char_alignments=False,
         )
 
     def diarise(self, audio_path: Path, num_speakers: int | None) -> Any:
@@ -74,7 +78,7 @@ class WhisperXEngine:
             from whisperx.diarize import DiarizationPipeline
 
             self._diarise_pipeline = DiarizationPipeline(
-                model_name=DIARISATION_MODEL, token=self._hf_token, device=DEVICE
+                model_name=DIARISATION_MODEL, token=self._hf_token, device=self._device
             )
         kwargs = {}
         if num_speakers is not None:

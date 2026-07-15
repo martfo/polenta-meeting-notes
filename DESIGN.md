@@ -23,7 +23,10 @@ back-to-back meetings queue behind one another while a new recording can always 
   distillation of large-v3, ~2x faster on CPU for negligible English accuracy loss), English
   wav2vec2 alignment. Diarisation via pyannote speaker-diarisation-community-1. faster-whisper's
   CTranslate2 backend supports only CPU and CUDA (no Apple Metal/GPU), so transcription is
-  CPU-bound on Apple Silicon; a future MLX-based engine could move it to the GPU.
+  CPU-bound on Apple Silicon; a future MLX-based engine could move it to the GPU. The PyTorch
+  stages, though -- pyannote diarisation and embedding, and wav2vec2 alignment -- run on the
+  Apple GPU via Metal (MPS) where available (pipeline/device.py), with a CPU fallback for any
+  unimplemented op and a MEETINGNOTES_FORCE_CPU escape hatch; diarisation is ~20x faster there.
 - Embeddings: bge-m3, run in the backend, vectors L2 normalised.
 - Vector store: LanceDB. Index: SQLite through the standard library with a small migration
   runner. No server.
