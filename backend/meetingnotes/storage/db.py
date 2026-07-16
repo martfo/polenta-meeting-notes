@@ -89,6 +89,12 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE meetings ADD COLUMN summary_edited INTEGER NOT NULL DEFAULT 0;
     """,
+    # 3: the folder the model suggested for filing, computed once and cached so
+    # the (slow) suggestion is not recomputed every time the meeting is opened.
+    # NULL means not computed yet; a name is the cached suggestion.
+    """
+    ALTER TABLE meetings ADD COLUMN suggested_folder TEXT;
+    """,
 ]
 
 PROCESSING_STATUSES = {

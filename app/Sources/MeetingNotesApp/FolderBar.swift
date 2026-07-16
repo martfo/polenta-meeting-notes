@@ -13,6 +13,7 @@ struct FolderBar: View {
     @EnvironmentObject var model: AppModel
     @State private var folders: [String] = []
     @State private var suggestion: String?
+    @State private var suggesting = false
     @State private var askingForName = false
     @State private var newFolderName = ""
 
@@ -40,19 +41,28 @@ struct FolderBar: View {
             }
             .frame(maxWidth: 260, alignment: .leading)
 
-            if currentFolder == nil, let suggestion {
-                Text("Suggested: \(suggestion)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button("Accept") { file(in: suggestion) }
-                    .controlSize(.small)
+            if currentFolder == nil {
+                if let suggestion {
+                    Text("Suggested: \(suggestion)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Accept") { file(in: suggestion) }
+                        .controlSize(.small)
+                } else if suggesting {
+                    ProgressView().controlSize(.small)
+                    Text("Suggesting a folder…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
         }
         .task(id: meetingID) {
             folders = (try? await model.client.folders()) ?? []
             if currentFolder == nil {
+                suggesting = true
                 suggestion = try? await model.client.suggestFolder(meetingID)
+                suggesting = false
             }
         }
         .alert("New folder", isPresented: $askingForName) {

@@ -263,6 +263,12 @@ The prompt lists each existing folder with a few of the meeting titles already f
 (storage.folders.folder_examples), so the model matches a new meeting against how meetings have
 actually been categorised, not just the folder names.
 
+The suggestion is a slow LLM call, so it is computed once and cached in the meetings row
+(suggested_folder). The pipeline precomputes it after summarising, for an unfiled meeting,
+while LM Studio is up; the endpoint otherwise computes it on demand and caches it. Only a real
+suggestion is cached, so a miss (LM Studio down, or no usable reply) is retried next time
+rather than stuck. Opening a meeting again reads the cache instead of re-asking the model.
+
 ## Speaker matching
 
 For each diarised cluster:

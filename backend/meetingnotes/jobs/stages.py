@@ -216,6 +216,18 @@ def build_stages(
         ) if ocr_engine is not None else []
         summarise_meeting(conn, vault, lm_client, meeting_id, transcript, notes, ocr_texts)
 
+        # Precompute and cache the folder suggestion now, while LM Studio is up
+        # and the summary is fresh, so the library shows it without a wait when
+        # the meeting is opened. Only for an unfiled meeting, and never fatal to
+        # the pipeline: a missed suggestion is just recomputed on demand later.
+        if m.get_meeting(conn, meeting_id)["folder_id"] is None:
+            from meetingnotes.llm.folder_filing import suggested_folder
+
+            try:
+                suggested_folder(conn, vault, lm_client, meeting_id)
+            except Exception:
+                pass
+
     return {
         "transcribe": transcribe,
         "diarise": diarise,

@@ -9,9 +9,9 @@ def test_ac_x_b_storage_integrity_roundtrip(tmp_path, vault):
     front matter round-trips through write and read."""
     conn = open_db(vault.db_path)
     try:
-        assert schema_version(conn) == 2
+        assert schema_version(conn) == 3
         migrate(conn)  # applying again changes nothing
-        assert schema_version(conn) == 2
+        assert schema_version(conn) == 3
         columns = {r["name"] for r in conn.execute("PRAGMA table_info(meetings)").fetchall()}
         assert "summary_edited" in columns
         tables = {r["name"] for r in conn.execute(

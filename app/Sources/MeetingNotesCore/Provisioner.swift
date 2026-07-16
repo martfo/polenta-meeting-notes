@@ -85,7 +85,10 @@ public enum RuntimeLocation {
 ///     error seen on a real run): alignment, diarisation, and embedding each
 ///     retry on CPU if a GPU op fails, so a device quirk slows a meeting
 ///     rather than failing it.
-public let runtimeVersion = "31"
+/// 32: the folder suggestion is computed once and cached on the meeting row
+///     (precomputed after summarising), so opening a meeting no longer re-runs
+///     the slow LLM call every time.
+public let runtimeVersion = "32"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

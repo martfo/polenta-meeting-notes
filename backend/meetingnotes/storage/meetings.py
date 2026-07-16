@@ -72,6 +72,14 @@ def set_folder(conn: sqlite3.Connection, meeting_id: str, folder_id: int) -> Non
     conn.commit()
 
 
+def set_suggested_folder(conn: sqlite3.Connection, meeting_id: str, folder: str) -> None:
+    """Cache the model's folder suggestion so it is computed once, not on every
+    open."""
+    conn.execute(
+        "UPDATE meetings SET suggested_folder = ? WHERE id = ?", (folder, meeting_id))
+    conn.commit()
+
+
 def add_attendee(
     conn: sqlite3.Connection, meeting_id: str, name: str,
     email: str | None = None, from_calendar: bool = False,

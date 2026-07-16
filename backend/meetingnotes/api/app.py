@@ -20,7 +20,7 @@ from meetingnotes.jobs import queue as q
 from meetingnotes.jobs.importer import import_wav
 from meetingnotes.jobs.worker import Worker, retry_meeting
 from meetingnotes.llm.chat import ask_meeting
-from meetingnotes.llm.folders import suggest_folder
+from meetingnotes.llm.folder_filing import suggested_folder
 from meetingnotes.notes.notes import paste_image, read_notes, write_notes
 from meetingnotes.storage import folders as fol
 from meetingnotes.storage import meetings as m
@@ -227,31 +227,12 @@ def create_app(state: AppState) -> FastAPI:
 
     @app.post("/meetings/{meeting_id}/suggest-folder")
     def folder_suggestion(meeting_id: str) -> dict:
-        row = m.get_meeting(conn, meeting_id)
-        # Give the model the title, attendees, and a slice of the summary or
-        # transcript, so the suggestion reflects what the meeting was about
-        # rather than a bare title.
-        parts = [f"Title: {row['title']}"]
-        attendees = [a["name"] for a in m.list_attendees(conn, meeting_id)]
-        if attendees:
-            parts.append("Attendees: " + ", ".join(attendees))
-        meeting_md = vault.meeting_md_path(meeting_id)
-        transcript_path = vault.transcript_path(meeting_id)
-        if meeting_md.exists():
-            from meetingnotes.storage.frontmatter import read_meeting_md
-
-            _, body = read_meeting_md(meeting_md)
-            parts.append("Summary:\n" + body[:1500])
-        elif transcript_path.exists():
-            parts.append("Transcript extract:\n" + transcript_path.read_text()[:1500])
-
-        suggestion = suggest_folder(
-            state.lm_client, fol.list_folders(conn), "\n\n".join(parts),
-            folder_examples=fol.folder_examples(conn),
-        )
-        if suggestion is None:
+        # Cached after the first computation (here or during the pipeline), so
+        # opening a meeting again does not re-run the slow LLM call.
+        folder = suggested_folder(conn, vault, state.lm_client, meeting_id)
+        if folder is None:
             return {"folder": None, "is_new": False}
-        return {"folder": suggestion.folder, "is_new": suggestion.is_new}
+        return {"folder": folder, "is_new": folder not in fol.list_folders(conn)}
 
     @app.get("/meetings/{meeting_id}/speakers")
     def meeting_speakers(meeting_id: str) -> list[dict]:

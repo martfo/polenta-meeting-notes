@@ -102,3 +102,36 @@ def test_ac_1_7_f_suggestion_prompt_carries_example_titles(fixtures_dir):
     prompt = client.requests[0][0]["content"]
     assert "Acme kickoff; Acme review" in prompt
     assert "Suppliers: (no meetings filed yet)" in prompt
+
+
+def test_ac_1_7_g_suggestion_is_computed_once_and_cached(conn, vault, fixtures_dir):
+    """The slow LLM call runs once; opening the meeting again reads the cached
+    suggestion instead of asking the model every time."""
+    from meetingnotes.llm.folder_filing import suggested_folder
+
+    ok = (fixtures_dir / "llm" / "folder_suggestion_ok.json").read_text()  # -> "Clients"
+    f.create_folder(conn, "Clients")
+    meeting_id = make_meeting(conn, vault)
+    client = FakeLMClient(ok)
+
+    first = suggested_folder(conn, vault, client, meeting_id)
+    second = suggested_folder(conn, vault, client, meeting_id)
+
+    assert first == "Clients" and second == "Clients"
+    assert len(client.requests) == 1, "the model is asked once, then the cache serves"
+    assert m.get_meeting(conn, meeting_id)["suggested_folder"] == "Clients"
+
+
+def test_ac_1_7_h_no_suggestion_is_not_cached(conn, vault, fixtures_dir):
+    """A miss (no usable suggestion) is not cached, so it can be retried once
+    the model or the folders improve, rather than being stuck on nothing."""
+    from meetingnotes.llm.folder_filing import suggested_folder
+
+    malformed = (fixtures_dir / "llm" / "folder_suggestion_malformed.txt").read_text()
+    meeting_id = make_meeting(conn, vault)
+    client = FakeLMClient(malformed)
+
+    assert suggested_folder(conn, vault, client, meeting_id) is None
+    assert m.get_meeting(conn, meeting_id)["suggested_folder"] is None
+    assert suggested_folder(conn, vault, client, meeting_id) is None
+    assert len(client.requests) == 2, "a miss is retried, not cached"
