@@ -6,8 +6,15 @@ checks answer at once."""
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+# Before torch is imported anywhere: let the Apple GPU (MPS) fall back to CPU
+# for any op it has not implemented, rather than crashing the pipeline. The
+# pipeline stages also set this, but doing it first thing guarantees it is in
+# effect no matter what imports torch first.
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 
 class _Lazy:

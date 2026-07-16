@@ -33,18 +33,23 @@ def _load_waveform(audio_path: Path) -> dict:
 
 class PyannoteSpeakerEmbedder:
     def __init__(self, hf_token: str | None = None):
-        import torch
-        from pyannote.audio import Inference, Model
+        from pyannote.audio import Model
 
         from meetingnotes.pipeline.device import pipeline_device
 
         # pyannote.audio 4 takes token=, not the older use_auth_token=.
-        model = Model.from_pretrained(EMBEDDING_MODEL, token=hf_token)
-        # Runs on the Apple GPU where available; unimplemented ops fall back to
-        # CPU (see device.py). Embedding is lighter than diarisation but shares
-        # the same model family, so it moves with it.
-        self._inference = Inference(
-            model, window="whole", device=torch.device(pipeline_device()))
+        self._model = Model.from_pretrained(EMBEDDING_MODEL, token=hf_token)
+        # Runs on the Apple GPU where available, but like alignment and
+        # diarisation it falls back to CPU (permanently, for this embedder) if
+        # a GPU op fails, so a device quirk never fails a meeting.
+        self._device = pipeline_device()
+        self._inference = self._build(self._device)
+
+    def _build(self, device: str):
+        import torch
+        from pyannote.audio import Inference
+
+        return Inference(self._model, window="whole", device=torch.device(device))
 
     def embed_span(self, audio_path: Path, start: float, end: float) -> np.ndarray:
         from pyannote.core import Segment as Span
@@ -58,9 +63,17 @@ class PyannoteSpeakerEmbedder:
         # whole-file or boundary span is clamped one sample short.
         duration = audio["waveform"].shape[1] / rate
         end = min(end, duration - 1.0 / rate)
-        return np.asarray(
-            self._inference.crop(audio, Span(start, end))
-        ).reshape(-1)
+        try:
+            return np.asarray(self._inference.crop(audio, Span(start, end))).reshape(-1)
+        except Exception as exc:
+            if self._device == "cpu":
+                raise
+            import logging
+            logging.getLogger("meetingnotes.pipeline").warning(
+                "speaker embedding failed on %s (%s); falling back to CPU", self._device, exc)
+            self._device = "cpu"
+            self._inference = self._build("cpu")
+            return np.asarray(self._inference.crop(audio, Span(start, end))).reshape(-1)
 
     def cluster_voiceprints(
         self, audio_path: Path, segments: list[Segment], min_span_s: float = 0.5,

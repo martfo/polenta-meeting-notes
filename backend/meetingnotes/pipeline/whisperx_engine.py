@@ -16,11 +16,14 @@ change can move transcription to an Apple-GPU engine (MLX) for a larger win.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 from meetingnotes.pipeline.audio_io import load_audio_16k_mono
 from meetingnotes.pipeline.device import pipeline_device
+
+_log = logging.getLogger("meetingnotes.pipeline")
 
 # distil-large-v3 -> Systran/faster-distil-whisper-large-v3 (English only).
 WHISPER_MODEL = "distil-large-v3"
@@ -38,7 +41,15 @@ class WhisperXEngine:
         self._whisperx = whisperx
         self._hf_token = hf_token
         self._batch_size = batch_size
-        self._device = pipeline_device()
+        # Alignment and diarisation prefer the GPU but fall back to CPU on any
+        # failure, independently and permanently for this engine. Moving a model
+        # to MPS can fail deep in torch (a "meta tensor" copy error, say) in ways
+        # that are environment-specific and hard to predict, so rather than
+        # trust it, we try and recover: a GPU quirk slows a meeting down, it
+        # never fails it. Each stage remembers its working device so the failure
+        # is paid at most once.
+        self._align_device = pipeline_device()
+        self._diarise_device = pipeline_device()
         self._asr = None
         self._loaded_prompt: str | None = None
         self._align_model = None
@@ -63,23 +74,26 @@ class WhisperXEngine:
         return self._asr.transcribe(audio, batch_size=self._batch_size, language=language)
 
     def align(self, result: dict, audio_path: Path, language: str, model_name: str) -> dict:
-        if self._align_model is None:
-            self._align_model, self._align_metadata = self._whisperx.load_align_model(
-                language_code=language, device=self._device, model_name=model_name
-            )
         audio = load_audio_16k_mono(audio_path)
-        return self._whisperx.align(
-            result["segments"], self._align_model, self._align_metadata, audio,
-            self._device, return_char_alignments=False,
-        )
+
+        def run(device: str) -> dict:
+            if self._align_model is None:
+                self._align_model, self._align_metadata = self._whisperx.load_align_model(
+                    language_code=language, device=device, model_name=model_name
+                )
+            return self._whisperx.align(
+                result["segments"], self._align_model, self._align_metadata, audio,
+                device, return_char_alignments=False,
+            )
+
+        def reset() -> None:
+            self._align_model = None
+            self._align_metadata = None
+
+        self._align_device, out = self._with_cpu_fallback("alignment", self._align_device, run, reset)
+        return out
 
     def diarise(self, audio_path: Path, num_speakers: int | None) -> Any:
-        if self._diarise_pipeline is None:
-            from whisperx.diarize import DiarizationPipeline
-
-            self._diarise_pipeline = DiarizationPipeline(
-                model_name=DIARISATION_MODEL, token=self._hf_token, device=self._device
-            )
         kwargs = {}
         if num_speakers is not None:
             kwargs["min_speakers"] = kwargs["max_speakers"] = num_speakers
@@ -87,7 +101,36 @@ class WhisperXEngine:
         # only shells out to ffmpeg when handed a filename, and pyannote 4's
         # own file decoding needs torchcodec/FFmpeg libraries we avoid.
         audio = load_audio_16k_mono(audio_path)
-        return self._diarise_pipeline(audio, **kwargs)
+
+        def run(device: str) -> Any:
+            if self._diarise_pipeline is None:
+                from whisperx.diarize import DiarizationPipeline
+
+                self._diarise_pipeline = DiarizationPipeline(
+                    model_name=DIARISATION_MODEL, token=self._hf_token, device=device
+                )
+            return self._diarise_pipeline(audio, **kwargs)
+
+        def reset() -> None:
+            self._diarise_pipeline = None
+
+        self._diarise_device, out = self._with_cpu_fallback(
+            "diarisation", self._diarise_device, run, reset)
+        return out
+
+    @staticmethod
+    def _with_cpu_fallback(name, device, run, reset):
+        """Run `run(device)`; if it fails on a GPU device, drop the models built
+        there and retry once on CPU. Returns the device that worked and the
+        result, so the caller sticks to CPU from then on."""
+        try:
+            return device, run(device)
+        except Exception as exc:
+            if device == "cpu":
+                raise
+            _log.warning("%s failed on %s (%s); falling back to CPU", name, device, exc)
+            reset()
+            return "cpu", run("cpu")
 
     def assign_speakers(self, diarisation: Any, aligned: dict) -> dict:
         from whisperx.diarize import assign_word_speakers

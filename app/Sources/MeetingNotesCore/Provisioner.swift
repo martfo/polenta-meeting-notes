@@ -81,7 +81,11 @@ public enum RuntimeLocation {
 /// 30: the PyTorch pipeline stages (pyannote diarisation and embedding,
 ///     wav2vec2 alignment) run on the Apple GPU via Metal (MPS) where
 ///     available, with a CPU fallback; diarisation is ~20x faster.
-public let runtimeVersion = "30"
+/// 31: that GPU path now recovers from a runtime failure (a meta-tensor move
+///     error seen on a real run): alignment, diarisation, and embedding each
+///     retry on CPU if a GPU op fails, so a device quirk slows a meeting
+///     rather than failing it.
+public let runtimeVersion = "31"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.
