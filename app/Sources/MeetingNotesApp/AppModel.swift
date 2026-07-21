@@ -162,29 +162,36 @@ final class AppModel: ObservableObject {
 
     // MARK: - Auto-stop
 
-    /// Auto-stop the recording at the calendar meeting's end (plus a short
-    /// grace), or after a maximum length as a safety net, whichever comes
-    /// first, so a forgotten recording stops itself.
+    /// Auto-stop a forgotten or ended recording. A calendar meeting's scheduled
+    /// end is not a hard cutoff: past it the recording keeps going while the
+    /// call is still audible, and stops only once the call audio has been quiet
+    /// for a few minutes (the meeting really ended) or the maximum length is
+    /// reached. A timer re-checks every minute rather than sleeping to a fixed
+    /// deadline, so an overrunning meeting is recorded in full.
     private var autoStopTask: Task<Void, Never>?
+    /// How long the call must be silent, past the scheduled end, to be judged
+    /// over. Long enough to ride out a lull in conversation.
+    private static let quietThreshold: TimeInterval = 5 * 60
 
     private func scheduleAutoStop(meetingEnd: Date?) {
         autoStopTask?.cancel()
         let maxMinutes = UserDefaults.standard.object(forKey: "maxRecordingMinutes") as? Int ?? 180
-        var stopAt = Date().addingTimeInterval(Double(maxMinutes) * 60)
-        var reason = "the maximum recording length"
-        if let meetingEnd {
-            let candidate = meetingEnd.addingTimeInterval(120)  // 2 minutes past the end
-            if candidate < stopAt {
-                stopAt = candidate
-                reason = "the calendar meeting ended"
-            }
-        }
-        let delay = max(60, stopAt.timeIntervalSinceNow)
+        let maxStopAt = Date().addingTimeInterval(Double(maxMinutes) * 60)
+        let windDownAt = meetingEnd ?? .distantFuture
         autoStopTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(delay))
-            guard let self, !Task.isCancelled, self.capture.isCapturing else { return }
-            self.lastRecordingMessage = "Recording stopped automatically because \(reason)."
-            self.stopRecording()
+            while true {
+                try? await Task.sleep(for: .seconds(60))
+                guard let self, !Task.isCancelled, self.capture.isCapturing else { return }
+                let decision = AutoStop.decide(
+                    now: Date(), windDownAt: windDownAt, maxStopAt: maxStopAt,
+                    secondsSinceSystemActivity: self.capture.secondsSinceSystemActivity(),
+                    quietThreshold: Self.quietThreshold)
+                if case .stop(let reason) = decision {
+                    self.lastRecordingMessage = "Recording stopped automatically because \(reason)."
+                    self.stopRecording()
+                    return
+                }
+            }
         }
     }
 

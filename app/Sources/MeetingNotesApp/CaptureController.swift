@@ -30,6 +30,12 @@ final class CaptureController: ObservableObject {
     nonisolated(unsafe) private var microphoneSamples: [Float] = []
     nonisolated(unsafe) private var systemSamples: [Float] = []
     nonisolated(unsafe) private var originHostSeconds: Double?
+    // When the system-audio stream last carried real signal, as a reference
+    // timestamp. A plain Double load/store is atomic on 64-bit, so the auto-
+    // stop timer can read it off the main thread without a lock. Used to tell
+    // whether a call is still live past its scheduled end.
+    nonisolated(unsafe) private var lastSystemActivitySeconds = Date().timeIntervalSinceReferenceDate
+    private static let activityThreshold: Float = 0.004
     private let accumulationQueue = DispatchQueue(label: "capture.accumulate")
     private let ioQueue = DispatchQueue(label: "capture.io")
 
@@ -67,6 +73,7 @@ final class CaptureController: ObservableObject {
             systemSamples = []
             originHostSeconds = nil
         }
+        lastSystemActivitySeconds = Date().timeIntervalSinceReferenceDate
 
         try tap.start()
         // The delivery rate arrives per buffer, measured from the stream's own
@@ -76,6 +83,9 @@ final class CaptureController: ObservableObject {
         tap.onBuffer = { [weak self] mono, hostSeconds, rate in
             guard let self else { return }
             let level = LevelMeter.level(of: mono)
+            if level > Self.activityThreshold {
+                self.lastSystemActivitySeconds = Date().timeIntervalSinceReferenceDate
+            }
             let resampled = AudioMixer.resample(mono, from: rate)
             self.accumulationQueue.async {
                 self.classifier.observeSystem(mono)
@@ -137,6 +147,12 @@ final class CaptureController: ObservableObject {
     /// engine does not stamp a valid host time.
     nonisolated private static func hostSeconds(_ when: AVAudioTime) -> Double {
         HostClock.seconds(when.isHostTimeValid ? when.hostTime : mach_absolute_time())
+    }
+
+    /// How long the system-audio (call) stream has been silent, for the auto-
+    /// stop timer to tell whether a call is still live past its scheduled end.
+    nonisolated func secondsSinceSystemActivity() -> TimeInterval {
+        Date().timeIntervalSinceReferenceDate - lastSystemActivitySeconds
     }
 
     /// Switch the microphone mid-recording without stopping. System audio is

@@ -98,7 +98,11 @@ plus a long tail of enhancements from a week of real use. Notable subsystems:
 - **Calendar**: EventKit read-only. Wide due-window (5 min before → 25 min in), 15s poll,
   prompt-to-record (never auto-records). Call-app detection is edge-triggered on mic
   becoming busy (so idle Slack never prompts). Hand-started recordings borrow a
-  currently-happening event's title/attendees. Auto-stop at meeting end + max-duration safety.
+  currently-happening event's title/attendees. Auto-stop is audio-aware (`AutoStop.decide`,
+  polled each minute): the scheduled end is not a hard cutoff — past it the recording keeps
+  going while the call is still audible and stops only once the system audio has been quiet for
+  ~5 min (the call really ended) or the max-duration cap is hit, so overrunning meetings record
+  in full. `CaptureController.secondsSinceSystemActivity()` supplies the silence measure.
 - **Library**: Folders / Date grouping toggle (Today/Yesterday/Earlier this week/This
   month/Older). Folder suggestion uses the summary content and prefers existing folders.
 - **Global hotkey**: Carbon `RegisterEventHotKey` (works unfocused, no Accessibility perm).
