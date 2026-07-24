@@ -17,7 +17,8 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
-from typing import Callable, Mapping
+import time
+from typing import Any, Callable, Mapping
 
 from meetingnotes.jobs import queue as q
 from meetingnotes.llm.errors import LMStudioUnavailable
@@ -39,9 +40,19 @@ StageFn = Callable[[str], None]
 
 
 class Worker:
-    def __init__(self, conn: sqlite3.Connection, stages: Mapping[str, StageFn]):
+    def __init__(
+        self, conn: sqlite3.Connection, stages: Mapping[str, StageFn],
+        on_idle: Callable[[], int] | None = None, idle_interval: float = 60.0,
+    ):
         self.conn = conn
         self.stages = stages
+        # Called when the queue drains, at most every idle_interval seconds, to
+        # pick up work that no job represents -- summaries left pending while LM
+        # Studio was down, which should resume on their own once it returns. It
+        # returns how many jobs it enqueued so the worker wakes to run them.
+        self._on_idle = on_idle
+        self._idle_interval = idle_interval
+        self._last_idle = 0.0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._wake = threading.Event()
@@ -108,8 +119,24 @@ class Worker:
     def _loop(self) -> None:
         while not self._stop.is_set():
             if self.run_pending() == 0:
+                self._sweep_idle()
                 self._wake.wait(timeout=1.0)
                 self._wake.clear()
+
+    def _sweep_idle(self) -> None:
+        """When the queue is empty, occasionally look for work no job
+        represents. Throttled, and never fatal to the worker."""
+        if self._on_idle is None:
+            return
+        now = time.monotonic()
+        if now - self._last_idle < self._idle_interval:
+            return
+        self._last_idle = now
+        try:
+            if self._on_idle():
+                self.notify()
+        except Exception:
+            log.warning("idle sweep failed", exc_info=True)
 
 
 def retry_meeting(conn: sqlite3.Connection, meeting_id: str) -> int:
@@ -122,3 +149,35 @@ def retry_meeting(conn: sqlite3.Connection, meeting_id: str) -> int:
     m.clear_failure(conn, meeting_id)
     m.set_processing_status(conn, meeting_id, "queued")
     return q.enqueue(conn, meeting_id, stage=stage)
+
+
+def enqueue_pending_summaries(conn: sqlite3.Connection, lm_client: Any) -> int:
+    """Re-enqueue the summarise stage for every meeting left with its summary
+    pending, once LM Studio is reachable again. This makes the "retried later"
+    promise real: a summary skipped because LM Studio was down resumes on its
+    own when it returns, with no user action.
+
+    Guarded so it is safe to call on a timer: it does nothing while LM Studio is
+    unreachable (so a down server is not hammered, and nothing loops), and skips
+    a meeting that already has a job queued or running. Returns the count
+    enqueued."""
+    try:
+        if lm_client.status() != "ready":
+            return 0
+    except Exception:
+        return 0
+    rows = conn.execute(
+        "SELECT id FROM meetings WHERE summary_status = 'pending' "
+        "AND processing_status = 'ready'"
+    ).fetchall()
+    count = 0
+    for row in rows:
+        busy = conn.execute(
+            "SELECT 1 FROM processing_jobs WHERE meeting_id = ? "
+            "AND status IN ('queued', 'running')", (row["id"],)
+        ).fetchone()
+        if busy:
+            continue
+        retry_meeting(conn, row["id"])
+        count += 1
+    return count

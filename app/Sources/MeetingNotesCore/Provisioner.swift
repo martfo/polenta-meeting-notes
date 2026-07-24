@@ -88,7 +88,10 @@ public enum RuntimeLocation {
 /// 32: the folder suggestion is computed once and cached on the meeting row
 ///     (precomputed after summarising), so opening a meeting no longer re-runs
 ///     the slow LLM call every time.
-public let runtimeVersion = "32"
+/// 33: summaries left pending because LM Studio was down now resume on their
+///     own: the worker re-enqueues them when it is idle and LM Studio is
+///     reachable again, making the "retried later" promise real.
+public let runtimeVersion = "33"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

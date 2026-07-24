@@ -117,7 +117,12 @@ def main(config_path: str) -> None:
         ocr_engine=VisionOcr(),
         chunk_indexer=chunk_indexer,
     )
-    worker = Worker(conn, stages)
+    from meetingnotes.jobs.worker import enqueue_pending_summaries
+
+    worker = Worker(
+        conn, stages,
+        on_idle=lambda: enqueue_pending_summaries(conn, lm_client),
+    )
     worker.start()
 
     app = create_app(AppState(

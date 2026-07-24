@@ -299,8 +299,11 @@ Capture and import both write audio to the vault and enqueue a job, then return 
 worker processes jobs first in, first out, through the stages transcribe, diarise, enrich,
 embed, summarise. One meeting at a time. The queue is persisted in processing_jobs and resumes
 after a restart. Summarising needs LM Studio; the earlier stages do not, so a meeting can
-reach transcribed with summary pending when LM Studio is down. A failed stage records a
-plain-language error and lets the worker move on.
+reach transcribed with summary pending when LM Studio is down. When the worker is idle it
+sweeps for such meetings and, if LM Studio is reachable again, re-enqueues their summarise
+stage (worker.enqueue_pending_summaries, throttled), so a summary skipped while LM Studio was
+down resumes on its own without the user retrying. A failed stage records a plain-language
+error and lets the worker move on.
 
 ## British English pass
 
