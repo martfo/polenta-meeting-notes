@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
+import subprocess
 import wave
 from datetime import datetime
 from pathlib import Path
 
 from meetingnotes.jobs import queue as q
+from meetingnotes.pipeline.audio_io import ensure_16k_mono_wav
 from meetingnotes.storage import meetings as m
 from meetingnotes.storage.vault import Vault
 
@@ -52,7 +54,14 @@ def import_wav(
     meeting_id = vault.new_meeting_id(started_at, title)
     meeting_dir = vault.meeting_dir(meeting_id)
     meeting_dir.mkdir(parents=True)
-    shutil.copyfile(wav_path, vault.audio_path(meeting_id))
+    # Store the audio correctly whatever the source format (an imported mp3, a
+    # WAV at another rate): the vault always holds 16 kHz mono PCM. A captured
+    # recording already is that, so this is just a copy.
+    try:
+        ensure_16k_mono_wav(wav_path, vault.audio_path(meeting_id))
+    except (subprocess.CalledProcessError, OSError) as exc:
+        shutil.rmtree(meeting_dir, ignore_errors=True)
+        raise ValueError(f"could not read the audio file '{wav_path.name}'") from exc
     if mic_path and system_path:
         mic_path, system_path = Path(mic_path), Path(system_path)
         if mic_path.exists() and system_path.exists():

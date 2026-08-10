@@ -14,6 +14,7 @@ preloaded-waveform path already used for pyannote embeddings in
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import tempfile
 import wave
@@ -23,6 +24,31 @@ import numpy as np
 
 TARGET_RATE = 16000
 AFCONVERT = "/usr/bin/afconvert"
+
+
+def ensure_16k_mono_wav(source: Path | str, destination: Path | str) -> Path:
+    """Write `destination` as a 16 kHz mono 16-bit PCM WAV from any audio the
+    Mac can read (mp3, m4a, a WAV at another rate, ...). This is how an imported
+    file is stored correctly in the vault: if the source is already 16 kHz mono
+    PCM it is copied unchanged, otherwise afconvert converts it."""
+    source, destination = Path(source), Path(destination)
+    if _is_16k_mono_pcm(source):
+        shutil.copyfile(source, destination)
+    else:
+        _afconvert_to_16k_mono(source, destination)
+    return destination
+
+
+def _is_16k_mono_pcm(path: Path) -> bool:
+    try:
+        with wave.open(str(path), "rb") as w:
+            return (
+                w.getframerate() == TARGET_RATE
+                and w.getnchannels() == 1
+                and w.getsampwidth() == 2
+            )
+    except (wave.Error, EOFError):
+        return False
 
 
 def load_audio_16k_mono(path: Path | str) -> np.ndarray:

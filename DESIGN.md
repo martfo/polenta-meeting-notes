@@ -125,6 +125,11 @@ diarisation; pyannote runs only on the system channel to separate the remote spe
 two are merged by timestamp into one transcript. Imported meetings (a single audio.wav, no
 channel files) use the original single-channel path.
 
+An existing recording can also be imported from Settings: any audio the Mac reads (mp3, m4a, a
+WAV at another rate) is converted to the vault's 16 kHz mono PCM on the way in
+(pipeline.audio_io.ensure_16k_mono_wav, afconvert) and then runs the single-channel pipeline,
+so it is transcribed, diarised, and summarised like a captured meeting.
+
 Before transcription each meeting builds a Whisper initial prompt from its participant names
 (the owner plus calendar attendees) and the configured glossary (config.glossary), so the
 model biases towards those words instead of a common-word homophone. The prompt is applied to

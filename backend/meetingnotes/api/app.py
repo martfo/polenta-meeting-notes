@@ -119,11 +119,14 @@ def create_app(state: AppState) -> FastAPI:
         source_path = Path(request.path)
         if not source_path.exists():
             raise HTTPException(404, f"no file at {request.path}")
-        meeting_id = import_wav(
-            conn, vault, source_path, title=request.title,
-            source=request.source, expected_speakers=request.expected_speakers,
-            mic_path=request.mic_path, system_path=request.system_path,
-        )
+        try:
+            meeting_id = import_wav(
+                conn, vault, source_path, title=request.title,
+                source=request.source, expected_speakers=request.expected_speakers,
+                mic_path=request.mic_path, system_path=request.system_path,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
         state.worker.notify()
         return {"meeting_id": meeting_id}
 

@@ -226,6 +226,15 @@ struct SettingsSheet: View {
             Form {
                 Section("Import") {
                     LabeledContent {
+                        Button(importing ? "Importing…" : "Choose audio…") { chooseAudioFile() }
+                            .disabled(importing)
+                    } label: {
+                        Label("Import an audio file", systemImage: "waveform")
+                        Text("Bring in an existing recording (mp3, m4a, wav). It is "
+                             + "transcribed, its speakers separated, and summarised like a "
+                             + "live meeting.")
+                    }
+                    LabeledContent {
                         Button(importing ? "Importing…" : "Choose CSV…") { chooseGranolaCSV() }
                             .disabled(importing)
                     } label: {
@@ -302,6 +311,31 @@ struct SettingsSheet: View {
         Task {
             try? await model.client.restoreDefaultSummaryPrompt()
             promptRestored = true
+        }
+    }
+
+    private func chooseAudioFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.audio, .mp3, .mpeg4Audio, .wav, .aiff]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.prompt = "Import"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let title = url.deletingPathExtension().lastPathComponent
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+        importing = true
+        importStatus = "Importing \(url.lastPathComponent)…"
+        Task {
+            defer { importing = false }
+            do {
+                _ = try await model.client.importAudioFile(path: url.path, title: title)
+                await model.refreshLibrary()
+                importStatus = "Imported \(url.lastPathComponent). It is in the library now "
+                    + "and will fill in as it transcribes and summarises."
+            } catch {
+                importStatus = "Could not import \(url.lastPathComponent): \(error.localizedDescription)"
+            }
         }
     }
 

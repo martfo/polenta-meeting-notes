@@ -91,7 +91,10 @@ public enum RuntimeLocation {
 /// 33: summaries left pending because LM Studio was down now resume on their
 ///     own: the worker re-enqueues them when it is idle and LM Studio is
 ///     reachable again, making the "retried later" promise real.
-public let runtimeVersion = "33"
+/// 34: importing an audio file (mp3, m4a, a WAV at another rate) converts it to
+///     the vault's 16 kHz mono format on the way in, so an existing recording
+///     is transcribed, diarised, and summarised like a live meeting.
+public let runtimeVersion = "34"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

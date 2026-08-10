@@ -63,6 +63,39 @@ def test_import_rejects_empty_audio(conn, vault, tmp_path):
     assert conn.execute("SELECT COUNT(*) FROM meetings").fetchone()[0] == 0
 
 
+def test_import_converts_non_16k_audio_to_vault_format(conn, vault, tmp_path):
+    """An imported file that is not already 16 kHz mono PCM (an mp3, or here a
+    48 kHz stereo WAV standing in for one) is converted, so the vault always
+    holds 16 kHz mono PCM and the normal single-channel pipeline runs."""
+    import math
+    import struct
+    import wave
+
+    src = tmp_path / "clip.wav"
+    rate = 48_000
+    with wave.open(str(src), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        frames = bytearray()
+        for i in range(rate):  # one second, stereo
+            v = int(0.3 * math.sin(2 * math.pi * 220 * i / rate) * 32767)
+            frames += struct.pack("<hh", v, v)
+        w.writeframes(bytes(frames))
+
+    meeting_id = import_wav(conn, vault, src, title="Imported clip", source="imported")
+
+    with wave.open(str(vault.audio_path(meeting_id)), "rb") as out:
+        assert out.getframerate() == 16_000
+        assert out.getnchannels() == 1
+        assert out.getsampwidth() == 2
+        assert out.getnframes() > 0
+    assert m.get_meeting(conn, meeting_id)["source"] == "imported"
+    job = conn.execute(
+        "SELECT stage FROM processing_jobs WHERE meeting_id = ?", (meeting_id,)).fetchone()
+    assert job["stage"] == "transcribe"
+
+
 def test_purge_empty_recordings(conn, vault, fixtures_dir):
     """The startup sweep removes meetings that captured nothing and keeps
     real ones."""

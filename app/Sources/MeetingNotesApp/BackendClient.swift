@@ -199,6 +199,16 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         let warnings: [String]
     }
 
+    /// Import an existing audio file (mp3, m4a, wav, ...) as a meeting. The
+    /// backend, on the same machine, reads the path directly, converts it to
+    /// the vault's 16 kHz mono format, and runs the normal pipeline.
+    func importAudioFile(path: String, title: String) async throws -> String {
+        struct Imported: Codable { let meeting_id: String }
+        let result: Imported = try await post(
+            "/meetings/import", body: ["path": path, "title": title, "source": "imported"])
+        return result.meeting_id
+    }
+
     func importGranolaCSV(_ csvText: String) async throws -> GranolaImportResult {
         struct Payload: Encodable { let csv_text: String }
         return try await send("POST", "/import/granola", encodable: Payload(csv_text: csvText))
