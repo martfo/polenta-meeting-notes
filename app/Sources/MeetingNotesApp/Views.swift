@@ -91,6 +91,10 @@ struct VaultPicker: View {
 struct MainSplit: View {
     @EnvironmentObject var model: AppModel
     @State private var showLibraryChat = false
+    // Audio files dropped on the window, held until the user confirms the import.
+    @State private var droppedAudio: [URL] = []
+    @State private var confirmingImport = false
+    @State private var dropTargeted = false
 
     var body: some View {
         ZStack {
@@ -127,6 +131,24 @@ struct MainSplit: View {
             }
         }
         .animation(.easeInOut(duration: 0.15), value: showLibraryChat)
+        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+            collectAudioDrops(providers)
+        }
+        .overlay {
+            if dropTargeted {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [8]))
+                    .padding(6)
+                    .allowsHitTesting(false)
+            }
+        }
+        .confirmationDialog(importPrompt, isPresented: $confirmingImport, titleVisibility: .visible) {
+            Button("Import") {
+                model.importAudioFiles(droppedAudio)
+                droppedAudio = []
+            }
+            Button("Cancel", role: .cancel) { droppedAudio = [] }
+        }
         .navigationTitle("Polenta Meeting Notes")
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -142,6 +164,47 @@ struct MainSplit: View {
                 RecordToolbarButton(capture: model.capture)
             }
         }
+    }
+
+    private var importPrompt: String {
+        if droppedAudio.count == 1 {
+            return "Import \(droppedAudio[0].lastPathComponent) as a meeting?"
+        }
+        return "Import \(droppedAudio.count) recordings as meetings?"
+    }
+
+    /// Gather the audio files from a drop, then ask to confirm. Returns whether
+    /// the drop held anything importable, so a non-audio drop is declined.
+    private func collectAudioDrops(_ providers: [NSItemProvider]) -> Bool {
+        let fileProviders = providers.filter {
+            $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+        }
+        guard !fileProviders.isEmpty else { return false }
+        let collected = NSMutableArray()
+        let lock = NSLock()
+        let group = DispatchGroup()
+        for provider in fileProviders {
+            group.enter()
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                if let url, Self.isAudio(url) {
+                    lock.lock(); collected.add(url); lock.unlock()
+                }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) {
+            let urls = collected.compactMap { $0 as? URL }
+            if !urls.isEmpty {
+                droppedAudio = urls
+                confirmingImport = true
+            }
+        }
+        return true
+    }
+
+    private static func isAudio(_ url: URL) -> Bool {
+        guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
+        return type.conforms(to: .audio)
     }
 }
 

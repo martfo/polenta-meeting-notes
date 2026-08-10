@@ -115,6 +115,38 @@ final class AppModel: ObservableObject {
         library = (try? await client.library()) ?? library
     }
 
+    // MARK: - Import
+
+    /// Import one or more existing audio files as meetings, converting and
+    /// enqueueing each through the same backend path the Settings picker uses.
+    /// Progress is reported in the status banner.
+    func importAudioFiles(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        Task {
+            var imported = 0
+            var lastError: String?
+            for url in urls {
+                let title = url.deletingPathExtension().lastPathComponent
+                    .replacingOccurrences(of: "_", with: " ")
+                    .replacingOccurrences(of: "-", with: " ")
+                do {
+                    _ = try await client.importAudioFile(path: url.path, title: title)
+                    imported += 1
+                } catch {
+                    lastError = "Could not import \(url.lastPathComponent): \(error.localizedDescription)"
+                }
+            }
+            if imported > 0 {
+                await refreshLibrary()
+                lastRecordingMessage = imported == 1
+                    ? "Imported \(urls.first!.lastPathComponent). It will transcribe and summarise now."
+                    : "Imported \(imported) recordings. They will transcribe and summarise now."
+            } else if let lastError {
+                lastRecordingMessage = lastError
+            }
+        }
+    }
+
     // MARK: - Recording
 
     /// Guards start/stop so a rapid double press (button plus hotkey, or a
