@@ -9,15 +9,18 @@ let package = Package(
             name: "MeetingNotesCore",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // A tiny Objective-C shim to catch NSExceptions from AVFoundation calls
+        // that would otherwise abort the app (AVAudioEngine.installTapOnBus).
+        .target(name: "ObjCSupport"),
         .executableTarget(
             name: "MeetingNotesApp",
-            dependencies: ["MeetingNotesCore"],
+            dependencies: ["MeetingNotesCore", "ObjCSupport"],
             resources: [.copy("Resources")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
             name: "MeetingNotesCoreTests",
-            dependencies: ["MeetingNotesCore"],
+            dependencies: ["MeetingNotesCore", "ObjCSupport"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]

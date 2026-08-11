@@ -7,6 +7,11 @@ import AVFoundation
 import CoreAudio
 import Foundation
 import MeetingNotesCore
+import ObjCSupport
+import os
+
+private let captureLog = Logger(
+    subsystem: "co.uk.designturbine.meetingnotes", category: "capture")
 
 @MainActor
 final class CaptureController: ObservableObject {
@@ -102,25 +107,39 @@ final class CaptureController: ObservableObject {
 
     nonisolated private func installMicTapAndStart() throws {
         let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        let inputRate = format.sampleRate
-        // An absent or invalid input device gives a zero format; installing a
-        // tap on it crashes the engine. Record system audio only in that case.
-        guard format.channelCount > 0, inputRate > 0 else {
-            engine.prepare()
-            try engine.start()
-            return
-        }
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, when in
-            guard let self, let channel = buffer.floatChannelData?[0] else { return }
-            let mono = Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
-            let level = LevelMeter.level(of: mono)
-            let resampled = AudioMixer.resample(mono, from: inputRate)
-            let hostSeconds = Self.hostSeconds(when)
-            self.accumulationQueue.async {
-                self.place(resampled, into: &self.microphoneSamples, atHostSeconds: hostSeconds)
+        let output = input.outputFormat(forBus: 0)
+        let hardware = input.inputFormat(forBus: 0)
+        // AVAudioEngine aborts the whole app with an uncatchable NSException if
+        // the tap format is invalid or its sample rate disagrees with the input
+        // hardware -- exactly what a Bluetooth microphone (AirPods) does when it
+        // switches rate as it becomes active. Two defences: only attempt the tap
+        // when the formats are valid and agree, and wrap installTap so any
+        // exception that still slips through (a device change mid-call) is
+        // caught. A tap format of nil makes the engine use the node's own
+        // format, so there is no stale format to mismatch. If the microphone
+        // cannot be tapped safely, record the system audio alone rather than
+        // crash.
+        let micUsable = output.channelCount > 0 && output.sampleRate > 0
+            && hardware.sampleRate > 0 && hardware.sampleRate == output.sampleRate
+        if micUsable {
+            let failure = ObjCTryCatch {
+                input.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, when in
+                    guard let self, let channel = buffer.floatChannelData?[0] else { return }
+                    let mono = Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
+                    let level = LevelMeter.level(of: mono)
+                    let resampled = AudioMixer.resample(mono, from: buffer.format.sampleRate)
+                    let hostSeconds = Self.hostSeconds(when)
+                    self.accumulationQueue.async {
+                        self.place(resampled, into: &self.microphoneSamples, atHostSeconds: hostSeconds)
+                    }
+                    Task { @MainActor in self.microphoneLevel = level }
+                }
             }
-            Task { @MainActor in self.microphoneLevel = level }
+            if failure != nil {
+                captureLog.error("could not tap the microphone; recording system audio only")
+            }
+        } else {
+            captureLog.warning("microphone format unavailable or mismatched; recording system audio only")
         }
         engine.prepare()
         try engine.start()
