@@ -96,7 +96,10 @@ public enum RuntimeLocation {
 ///     is transcribed, diarised, and summarised like a live meeting.
 /// 35: an imported file named for when it was recorded (a date/time in the
 ///     filename) is filed under that date rather than the moment of import.
-public let runtimeVersion = "35"
+/// 36: a meeting's recorded date can be adjusted after the fact (the started_at
+///     column and meeting.md front matter update; the id stays), so an import
+///     filed on the wrong day can be corrected.
+public let runtimeVersion = "36"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

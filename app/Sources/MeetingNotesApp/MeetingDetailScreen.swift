@@ -35,6 +35,8 @@ struct MeetingDetailScreen: View {
     @State private var keepEditsChosen = false
     @State private var showDeleteConfirm = false
     @State private var showFindReplace = false
+    @State private var recordedDate = Date()
+    @State private var loadedDate: Date?
 
     private var contentFont: Font {
         Appearance.font(size: baseFontSize, design: fontDesign)
@@ -203,6 +205,27 @@ struct MeetingDetailScreen: View {
                     .font(.caption)
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            HStack(spacing: 6) {
+                Image(systemName: "calendar")
+                    .font(.caption).foregroundStyle(.secondary)
+                DatePicker(
+                    "Recorded", selection: $recordedDate,
+                    displayedComponents: [.date, .hourAndMinute])
+                    .datePickerStyle(.compact)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .fixedSize()
+                    .help("Adjust the recorded date, e.g. for an import filed on the wrong day")
+                    .onChange(of: recordedDate) { _, newValue in
+                        // The date is also set from the loaded meeting; only a real
+                        // user change (more than a second off the loaded value)
+                        // saves, so setting it on load does not loop.
+                        guard let loaded = loadedDate,
+                              abs(newValue.timeIntervalSince(loaded)) > 1 else { return }
+                        loadedDate = newValue
+                        saveRecordedDate(newValue)
+                    }
             }
             FolderBar(meetingID: meetingID, currentFolder: detail.folder) {
                 await reload(keepingDraft: true)
@@ -403,6 +426,32 @@ struct MeetingDetailScreen: View {
         return (inSummary.count, inNotes.count)
     }
 
+    /// Parses the stored started_at (which carries the local offset).
+    private static let isoParser: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    /// Formats a picked date as local wall-clock time with no offset; the
+    /// backend attaches the machine's local offset, so what the user sees is
+    /// what is stored.
+    private static let localWallClock: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return f
+    }()
+
+    private func saveRecordedDate(_ date: Date) {
+        let value = Self.localWallClock.string(from: date)
+        Task {
+            try? await model.client.setMeetingDate(meetingID, startedAt: value)
+            await reload(keepingDraft: true)
+            await model.refreshLibrary()  // re-files it under the new day
+        }
+    }
+
     private func saveSummary() {
         let text = summaryDraft
         guard detail?.summary != nil, text != lastSavedSummary, !text.isEmpty else { return }
@@ -421,6 +470,13 @@ struct MeetingDetailScreen: View {
         // of seconds; reassigning an identical detail would re-render the summary
         // and clear any text the user is selecting mid-drag.
         if detail != fresh { detail = fresh }
+        // Adopt the recorded date on first load and whenever the server's value
+        // changes (e.g. after a save), but not on every poll, so it never
+        // clobbers a date the user is mid-adjustment on.
+        if let parsed = Self.isoParser.date(from: fresh.started_at), parsed != loadedDate {
+            loadedDate = parsed
+            recordedDate = parsed
+        }
         if !keepingDraft || notesDraft.isEmpty {
             notesDraft = fresh.notes
             lastSavedNotes = fresh.notes

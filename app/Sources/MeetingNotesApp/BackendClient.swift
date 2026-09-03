@@ -43,6 +43,7 @@ struct MeetingAttendee: Codable, Hashable {
 
 struct MeetingDetail: Codable, Equatable {
     let id: String
+    let started_at: String
     let title: String
     let folder: String?
     let attendees: [MeetingAttendee]
@@ -173,6 +174,11 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
 
     func deleteMeeting(_ id: String) async throws {
         let _: [String: AnyDecodable] = try await request("DELETE", "/meetings/\(id)", body: nil)
+    }
+
+    func setMeetingDate(_ id: String, startedAt: String) async throws {
+        let _: [String: AnyDecodable] = try await put(
+            "/meetings/\(id)/date", body: ["started_at": startedAt])
     }
 
     func renameMeeting(_ id: String, title: String) async throws {

@@ -72,6 +72,13 @@ def set_folder(conn: sqlite3.Connection, meeting_id: str, folder_id: int) -> Non
     conn.commit()
 
 
+def set_started_at(conn: sqlite3.Connection, meeting_id: str, started_at: str) -> None:
+    """Adjust a meeting's recorded date/time (the id is left as it is)."""
+    conn.execute(
+        "UPDATE meetings SET started_at = ? WHERE id = ?", (started_at, meeting_id))
+    conn.commit()
+
+
 def set_suggested_folder(conn: sqlite3.Connection, meeting_id: str, folder: str) -> None:
     """Cache the model's folder suggestion so it is computed once, not on every
     open."""

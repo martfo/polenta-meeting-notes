@@ -71,6 +71,10 @@ class FolderRequest(BaseModel):
     name: str
 
 
+class StartedAtRequest(BaseModel):
+    started_at: str
+
+
 class CorrectionRequest(BaseModel):
     name: str | None = None
 
@@ -369,6 +373,28 @@ def create_app(state: AppState) -> FastAPI:
 
         refresh_meeting_files(conn, vault, meeting_id)
         return {"title": title}
+
+    @app.put("/meetings/{meeting_id}/date")
+    def set_meeting_date(meeting_id: str, request: StartedAtRequest) -> dict:
+        """Adjust a meeting's recorded date/time (e.g. an import that landed on
+        the wrong day). The meeting id stays as it is; the started_at column and
+        the meeting.md front matter update, so the library files it under the new
+        day."""
+        from datetime import datetime
+
+        m.get_meeting(conn, meeting_id)  # 404 via KeyError if absent
+        try:
+            dt = datetime.fromisoformat(request.started_at)
+        except ValueError:
+            raise HTTPException(422, "invalid date")
+        if dt.tzinfo is None:
+            dt = dt.astimezone()
+        started_at = dt.isoformat(timespec="seconds")
+        m.set_started_at(conn, meeting_id, started_at)
+        from meetingnotes.storage.refresh import refresh_meeting_files
+
+        refresh_meeting_files(conn, vault, meeting_id)
+        return {"started_at": started_at}
 
     def _enqueue_summarise(meeting_id: str) -> None:
         queued = conn.execute(

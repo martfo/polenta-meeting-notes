@@ -131,7 +131,10 @@ PCM on the way in (pipeline.audio_io.ensure_16k_mono_wav, afconvert) and then ru
 single-channel pipeline, so it is transcribed, diarised, and summarised like a captured
 meeting. When the filename encodes a recording date/time (jobs.filename_date, e.g.
 "2026-08-19 14-30.m4a" or "20260819_143000"), that becomes the meeting's recorded date so it
-files under the right day; captures are unaffected as they pass their own time.
+files under the right day; captures are unaffected as they pass their own time. A meeting's
+recorded date can also be adjusted after the fact from the detail header (PUT
+/meetings/{id}/date): the started_at column and the meeting.md front matter update and the
+library re-files it, while the meeting id is left as it is.
 
 Before transcription each meeting builds a Whisper initial prompt from its participant names
 (the owner plus calendar attendees) and the configured glossary (config.glossary), so the
