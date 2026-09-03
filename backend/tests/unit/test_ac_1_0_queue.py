@@ -96,6 +96,34 @@ def test_import_converts_non_16k_audio_to_vault_format(conn, vault, tmp_path):
     assert job["stage"] == "transcribe"
 
 
+def _tiny_wav(path):
+    import wave
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16_000)
+        w.writeframes(b"\x64\x00" * 16_000)  # 1 second of quiet tone
+
+
+def test_imported_file_uses_the_date_in_its_name(conn, vault, tmp_path):
+    """An imported recording named for when it was made files under that day
+    and time, not the moment of import."""
+    src = tmp_path / "2026-08-19 14-30-00.wav"
+    _tiny_wav(src)
+    meeting_id = import_wav(conn, vault, src, source="imported")
+    assert meeting_id.startswith("2026-08-19_1430")
+    assert m.get_meeting(conn, meeting_id)["started_at"].startswith("2026-08-19T14:30")
+
+
+def test_capture_ignores_a_date_in_the_filename(conn, vault, tmp_path):
+    """The filename date is only for imports; a captured recording (a different
+    source) keeps its real time even if its staging file happens to be dated."""
+    src = tmp_path / "2020-01-01 00-00-00.wav"
+    _tiny_wav(src)
+    meeting_id = import_wav(conn, vault, src, source="online")
+    assert not meeting_id.startswith("2020-01-01")
+
+
 def test_purge_empty_recordings(conn, vault, fixtures_dir):
     """The startup sweep removes meetings that captured nothing and keeps
     real ones."""

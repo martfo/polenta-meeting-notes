@@ -94,7 +94,9 @@ public enum RuntimeLocation {
 /// 34: importing an audio file (mp3, m4a, a WAV at another rate) converts it to
 ///     the vault's 16 kHz mono format on the way in, so an existing recording
 ///     is transcribed, diarised, and summarised like a live meeting.
-public let runtimeVersion = "34"
+/// 35: an imported file named for when it was recorded (a date/time in the
+///     filename) is filed under that date rather than the moment of import.
+public let runtimeVersion = "35"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

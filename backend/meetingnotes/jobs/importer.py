@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from meetingnotes.jobs import queue as q
+from meetingnotes.jobs.filename_date import datetime_from_filename
 from meetingnotes.pipeline.audio_io import ensure_16k_mono_wav
 from meetingnotes.storage import meetings as m
 from meetingnotes.storage.vault import Vault
@@ -49,6 +50,11 @@ def import_wav(
     if not wav_path.exists() or wav_path.stat().st_size <= 44:
         raise ValueError("cannot import an empty or missing audio file")
     title = title or wav_path.stem.replace("_", " ").replace("-", " ").strip() or "Imported meeting"
+    # An imported recording is usually named for when it was made, so read the
+    # date from the filename and file the meeting under that day rather than the
+    # moment of import. Captures pass their own started_at and are untouched.
+    if started_at is None and source == "imported":
+        started_at = datetime_from_filename(wav_path.stem)
     started_at = started_at or datetime.now().astimezone()
 
     meeting_id = vault.new_meeting_id(started_at, title)
