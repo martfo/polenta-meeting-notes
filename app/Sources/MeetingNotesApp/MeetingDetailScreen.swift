@@ -34,6 +34,7 @@ struct MeetingDetailScreen: View {
     @State private var showRegeneratePrompt = false
     @State private var keepEditsChosen = false
     @State private var showDeleteConfirm = false
+    @State private var showFindReplace = false
 
     private var contentFont: Font {
         Appearance.font(size: baseFontSize, design: fontDesign)
@@ -100,6 +101,9 @@ struct MeetingDetailScreen: View {
         } message: {
             Text("The recording, transcript, summary, and notes are removed "
                  + "from the vault. Voices you have named stay remembered.")
+        }
+        .sheet(isPresented: $showFindReplace) {
+            FindReplaceSheet(summary: summaryDraft, notes: notesDraft, replace: performReplace)
         }
         .task(id: meetingID) {
             chatHistory = []
@@ -176,6 +180,7 @@ struct MeetingDetailScreen: View {
                         }
                     }
                     .disabled(detail.transcript == nil)
+                    Button("Find and replace…") { showFindReplace = true }
                     Divider()
                     Button("Delete meeting", role: .destructive) {
                         showDeleteConfirm = true
@@ -378,6 +383,26 @@ struct MeetingDetailScreen: View {
         }
     }
 
+    /// Replace a term across this meeting's summary and notes, saving each
+    /// through the normal edit path (so an edited summary is not regenerated
+    /// over). Returns how many replacements were made in each.
+    private func performReplace(_ find: String, _ replacement: String, _ caseSensitive: Bool)
+        -> (summary: Int, notes: Int) {
+        let inSummary = TextReplace.replacingAll(
+            in: summaryDraft, find: find, with: replacement, caseSensitive: caseSensitive)
+        let inNotes = TextReplace.replacingAll(
+            in: notesDraft, find: find, with: replacement, caseSensitive: caseSensitive)
+        if inSummary.count > 0 {
+            summaryDraft = inSummary.text
+            saveSummary()
+        }
+        if inNotes.count > 0 {
+            notesDraft = inNotes.text
+            saveNotes()
+        }
+        return (inSummary.count, inNotes.count)
+    }
+
     private func saveSummary() {
         let text = summaryDraft
         guard detail?.summary != nil, text != lastSavedSummary, !text.isEmpty else { return }
@@ -559,5 +584,72 @@ struct MarkdownPane: View {
                 .textSelection(.enabled)
                 .padding()
         }
+    }
+}
+
+/// Find and replace a name or term across one meeting's summary and notes, with
+/// a live match count before committing. The replace closure applies and saves.
+struct FindReplaceSheet: View {
+    let summary: String
+    let notes: String
+    let replace: (String, String, Bool) -> (summary: Int, notes: Int)
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var find = ""
+    @State private var replacement = ""
+    @State private var caseSensitive = false
+    @State private var result: String?
+
+    private var matches: (summary: Int, notes: Int) {
+        guard !find.isEmpty else { return (0, 0) }
+        return (TextReplace.count(in: summary, find: find, caseSensitive: caseSensitive),
+                TextReplace.count(in: notes, find: find, caseSensitive: caseSensitive))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Find and replace").font(.headline)
+            Text("Correct a mis-heard name or term everywhere in this meeting's "
+                 + "summary and notes at once.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            TextField("Find", text: $find)
+                .textFieldStyle(.roundedBorder)
+            TextField("Replace with", text: $replacement)
+                .textFieldStyle(.roundedBorder)
+            Toggle("Match case", isOn: $caseSensitive)
+
+            if !find.isEmpty {
+                let total = matches.summary + matches.notes
+                Text(total == 0
+                     ? "No matches."
+                     : "\(phrase(total, "match", "matches")): "
+                        + "\(matches.summary) in the summary, \(matches.notes) in the notes.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let result {
+                Label(result, systemImage: "checkmark.circle.fill")
+                    .font(.caption).foregroundStyle(.green)
+            }
+
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+                Button("Replace all") {
+                    let done = replace(find, replacement, caseSensitive)
+                    let total = done.summary + done.notes
+                    result = "Replaced \(phrase(total, "occurrence", "occurrences")): "
+                        + "\(done.summary) in the summary, \(done.notes) in the notes."
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(find.isEmpty || (matches.summary + matches.notes) == 0)
+            }
+        }
+        .padding(20)
+        .frame(width: 440)
+    }
+
+    private func phrase(_ n: Int, _ singular: String, _ plural: String) -> String {
+        "\(n) \(n == 1 ? singular : plural)"
     }
 }
