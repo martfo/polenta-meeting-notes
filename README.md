@@ -1,9 +1,10 @@
 # Polenta Meeting Notes
 
-A private, offline meeting notes app for macOS. It records a meeting, transcribes it locally
-with speaker labels, writes a structured summary, and lets you chat with one transcript or
-across a folder of them. Nothing that touches your audio, transcripts, or summaries leaves the
-machine while the app is in use.
+A private, offline meeting notes app for macOS. It records or imports a meeting, transcribes it
+locally with speaker labels, writes a structured summary, and lets you chat with one transcript
+or across a folder of them. Transcription and speaker separation run on the Apple GPU, and the
+summary is written by a local LLM. Nothing that touches your audio, transcripts, or summaries
+leaves the machine while the app is in use.
 
 ## What you need
 
@@ -19,7 +20,8 @@ The app walks you through this once:
 
 1. Choose where the vault lives, for example a folder called MeetingVault in your home folder.
 2. Accept the pyannote model licence and paste a Hugging Face token. The token is stored in
-   the macOS Keychain, never in a file.
+   the macOS Keychain, never in a file, and is filled in for you if you ever see this step
+   again after an update.
 3. The app downloads and caches the transcription and speaker models. This is the only time
    the app reaches the network. After this you can run it with networking off.
 4. The app checks that LM Studio is reachable and a model is loaded, and tells you plainly if
@@ -46,11 +48,32 @@ When you stop, the recording is saved and queued for processing, and you can sta
 meeting straight away. You do not have to wait for the previous one to finish. Meetings process
 one at a time in the background, and the library shows where each one is up to.
 
+If a recording is tied to a calendar meeting, its scheduled end is not a hard cut-off: the app
+keeps recording while the call is still going and stops once the audio has been quiet for a few
+minutes, so a meeting that runs over is captured in full. A long-running safety limit still
+stops a forgotten recording.
+
+## Importing existing recordings
+
+You can bring in audio you already have. Use Settings, Import, or simply drag one or more files
+onto the window and confirm. Most formats are accepted (mp3, m4a, wav) and are converted to the
+vault's format on the way in, then transcribed, speaker-separated, and summarised exactly like a
+live recording.
+
+Recordings are often named for when they were made, for example `2026-08-19 14-30.m4a` or
+`Recording 20260819_143000.mp3`. When the filename contains a date and time the meeting is filed
+under that day rather than the moment you imported it. If a date cannot be read, or you want to
+correct one, adjust the recorded date from the meeting's detail view and the library re-files it.
+
+You can also import your history from Granola: use its CSV export (Settings, Profile, Generate
+CSV) from Settings, Import. Those meetings come in with their transcript, summary, notes, and
+folder, ready to search and chat.
+
 ## After the meeting
 
-You get a transcript with speaker labels and a summary with three parts: the core items
-discussed, the next steps with an owner against each one, and any open questions. The summary
-is written in British English and is meant to be usable as it is, without editing.
+You get a transcript with speaker labels and a summary with these parts: the core items
+discussed, the next steps with an owner against each one, decisions, and any open questions. The
+summary is written in British English and is meant to be usable as it is.
 
 Speaker names are worked out in this order: a voice you have named before is recognised
 automatically, then the meeting's attendees are offered as names, then you can set or correct
@@ -58,12 +81,19 @@ any name by hand. If the app ever puts the wrong name on a voice, correct it onc
 not make that same mistake again, because the correction teaches the app rather than just
 fixing the one transcript.
 
-There is a notes pane where you can type during the meeting and paste screenshots. Your notes
-feed into the summary. Your own typed notes are left exactly as you wrote them.
+The summary and notes are yours to edit. You can edit the summary in place, and a find and
+replace tool fixes a mis-heard name or term across the summary and notes in one pass. There is a
+notes pane where you can type during the meeting and paste screenshots; your notes feed into the
+summary and your own words are left exactly as you wrote them.
+
+Summarising needs LM Studio. If it is not running when a meeting finishes, the transcript is
+still produced and the summary is left pending, then filled in on its own once LM Studio is back.
 
 ## Folders, chat, and search
 
-File each meeting in a folder. The app suggests one and you can accept it or pick another.
+File each meeting in a folder. The app suggests one, learning from how you have filed similar
+meetings before, and you can accept it or pick another. Right-click any meeting in the library
+for quick actions, and switch the library between folder and date views.
 
 Ask questions of a single meeting in its chat box, for example what technology someone
 mentioned or what their requirements were. To search across meetings, use the library chat and
@@ -77,6 +107,13 @@ transcript, the audio, your notes, and any pasted images. Use Reveal in Finder o
 to open its folder directly. Raw recordings are kept for 30 days by default and then removed,
 which you can change in settings. The transcript, summary, and notes are always kept.
 
+## British English
+
+Summaries and chat replies are put through a local British English pass before you see them.
+Known American spellings are changed to British automatically, and a bundled British dictionary
+quietly flags anything it does not recognise without changing names, technical terms, or code.
+This runs on the machine and needs no network.
+
 ## Logs
 
 Errors are logged to a rotating file in the logs folder inside the vault, so they sit under the
@@ -84,13 +121,6 @@ same FileVault protection as the rest of your data. Each line is written in plai
 a timestamp, and there is a matching machine-readable file for searching. The logs record what
 went wrong and where, never the content of your meetings. Use Reveal logs in Finder to open the
 folder.
-
-## British English
-
-Summaries and chat replies are put through a local British English pass before you see them.
-Known American spellings are changed to British automatically, and a bundled British dictionary
-quietly flags anything it does not recognise without changing names, technical terms, or code.
-This runs on the machine and needs no network.
 
 ## Setting up a new Mac
 
