@@ -17,6 +17,7 @@ change can move transcription to an Apple-GPU engine (MLX) for a larger win.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,11 @@ _log = logging.getLogger("meetingnotes.pipeline")
 
 # distil-large-v3 -> Systran/faster-distil-whisper-large-v3 (English only).
 WHISPER_MODEL = "distil-large-v3"
+# whisperx defaults to 4 CPU threads. Transcription is compute-bound and CPU
+# only, so on a many-core Mac that leaves most of the machine idle: measured
+# on real audio, 12 threads is about twice as fast as 4, with no further gain
+# past that (memory-bandwidth bound). Capped so a smaller Mac uses what it has.
+TRANSCRIBE_THREADS = min(os.cpu_count() or 4, 12)
 DIARISATION_MODEL = "pyannote/speaker-diarization-community-1"
 # Transcription (CTranslate2) has no Metal backend, so it stays on CPU; the
 # PyTorch stages below run on the Apple GPU where available (see device.py).
@@ -67,7 +73,7 @@ class WhisperXEngine:
             asr_options = {"initial_prompt": initial_prompt} if initial_prompt else None
             self._asr = self._whisperx.load_model(
                 WHISPER_MODEL, TRANSCRIBE_DEVICE, compute_type=COMPUTE_TYPE,
-                language=language, asr_options=asr_options,
+                language=language, asr_options=asr_options, threads=TRANSCRIBE_THREADS,
             )
             self._loaded_prompt = initial_prompt
         audio = load_audio_16k_mono(audio_path)

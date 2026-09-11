@@ -12,18 +12,28 @@ from meetingnotes.llm.errors import LMStudioUnavailable
 
 SUGGESTION_PROMPT = (
     "Suggest which folder this meeting belongs in. Strongly prefer an existing "
-    "folder from the list: choose one whenever the meeting plausibly fits it, "
-    "matching on the client, project, team, or topic. To decide, look at how "
-    "meetings have already been filed: each folder below lists example titles "
-    "of meetings already in it, so match this meeting to the folder whose "
-    "existing titles are most like it. Only propose a new folder when none of "
-    "the existing ones fit, and then give it a short, general name (a client, "
-    "project, or team name), not the meeting's title. "
+    "folder from the list below: choose the one whose already-filed meeting "
+    "titles are most like this meeting, matching on the client, project, team, "
+    "or topic. When in doubt, pick the closest existing folder rather than "
+    "inventing a new one. Only propose a new folder if the meeting clearly "
+    "belongs to a specific client, project, or team that is not already listed, "
+    "and then name it after that client, project, or team (not the meeting's "
+    "title). Never invent a generic catch-all folder such as General, "
+    "Miscellaneous, Other, Uncategorized, Meetings, or Notes. "
     "Reply with strict JSON and nothing else, in exactly this shape: "
     '{{"folder": "<name>", "is_new": <true or false>}}\n\n'
     "Existing folders and example titles already filed in each:\n{folders}\n\n"
     "Meeting:\n{context}"
 )
+
+# Generic catch-all names never make a useful new folder; if the model proposes
+# one anyway it is dropped rather than offered. An existing folder with such a
+# name is still fine to suggest.
+_GENERIC_NEW_FOLDERS = {
+    "general", "miscellaneous", "misc", "other", "others", "uncategorized",
+    "uncategorised", "meetings", "meeting", "notes", "various", "unsorted",
+    "inbox", "default", "untitled",
+}
 
 
 def _format_folders(existing_folders: list[str], examples: dict[str, list[str]]) -> str:
@@ -61,7 +71,7 @@ def parse_suggestion(reply: str, existing_folders: list[str]) -> FolderSuggestio
     folder = folder.strip()
     if folder in existing_folders:
         return FolderSuggestion(folder=folder, is_new=False)
-    if is_new:
+    if is_new and folder.lower() not in _GENERIC_NEW_FOLDERS:
         return FolderSuggestion(folder=folder, is_new=True)
     return None
 

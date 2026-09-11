@@ -99,7 +99,10 @@ public enum RuntimeLocation {
 /// 36: a meeting's recorded date can be adjusted after the fact (the started_at
 ///     column and meeting.md front matter update; the id stays), so an import
 ///     filed on the wrong day can be corrected.
-public let runtimeVersion = "36"
+/// 37: transcription uses more CPU threads (~2x faster on a many-core Mac), and
+///     folder suggestions never invent a generic catch-all folder (General,
+///     Uncategorized, ...) and prefer an existing folder.
+public let runtimeVersion = "37"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

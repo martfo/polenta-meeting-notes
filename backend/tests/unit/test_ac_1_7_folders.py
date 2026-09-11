@@ -104,6 +104,21 @@ def test_ac_1_7_f_suggestion_prompt_carries_example_titles(fixtures_dir):
     assert "Suppliers: (no meetings filed yet)" in prompt
 
 
+def test_ac_1_7_generic_new_folders_are_rejected():
+    """A proposed new folder with a generic catch-all name (General, Other, ...)
+    is dropped, so the app never suggests filing into a junk folder."""
+    from meetingnotes.llm.folders import parse_suggestion
+
+    for name in ("General", "uncategorized", "Miscellaneous", "Other", "Notes"):
+        reply = '{"folder": "%s", "is_new": true}' % name
+        assert parse_suggestion(reply, EXISTING) is None, name
+    # A specific new folder is still allowed.
+    ok = parse_suggestion('{"folder": "Acme Corp", "is_new": true}', EXISTING)
+    assert ok is not None and ok.is_new
+    # An existing folder that happens to have such a name is still fine.
+    assert parse_suggestion('{"folder": "Other", "is_new": false}', ["Other"]) is not None
+
+
 def test_ac_1_7_g_suggestion_is_computed_once_and_cached(conn, vault, fixtures_dir):
     """The slow LLM call runs once; opening the meeting again reads the cached
     suggestion instead of asking the model every time."""
