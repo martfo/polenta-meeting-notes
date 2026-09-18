@@ -2,7 +2,9 @@
 
 A running summary for continuing work in a fresh Claude Code session. Pair this with
 `DESIGN.md` (the pinned source of truth for schemas, formats, and architecture) and the git
-log (58 commits, each a self-contained slice with its own tests).
+log (85 commits, each a self-contained slice with its own tests). **Current runtime version is
+37**; HEAD is on `main`, pushed to `github.com/martfo/polenta-meeting-notes`. See the "Session
+log" section below for everything done since the app first shipped (runtime 24 → 37).
 
 ## What this is
 
@@ -28,11 +30,14 @@ message of the session; `DESIGN.md` reconciles it with the code.
 ## Build / test / ship
 
 - `make gate` — the fast gate (backend pytest fast markers + `swift test`). Single meaning of
-  green. Currently **105 backend + 24 app tests pass**.
+  green. Currently **145 backend + 43 app tests pass**.
 - `make pipeline` — real WhisperX/pyannote against fixtures (needs `uv sync --extra pipeline`,
-  the HF token in Keychain, and the pyannote licences accepted). Green as of last run.
+  the HF token in Keychain, and the pyannote licences accepted). Green as of last run (7 tests),
+  and diarisation/embedding run on the Apple GPU (MPS) there.
 - `make live-smoke` — needs LM Studio running with a model loaded.
-- `make dmg` — builds and signs `dist/PolentaMeetingNotes.dmg`.
+- `make dmg` — builds and signs `dist/PolentaMeetingNotes.dmg`. **See the build-hygiene gotcha
+  below: after bumping `runtimeVersion`, `rm -rf app/.build` before `make dmg`** or the
+  incremental release build can embed a stale version and provisioning mislabels the runtime.
 
 ### Toolchain gotchas (all already handled, but know them)
 - **uv** is required (`brew install uv`); backend runs under Python 3.11.
@@ -53,11 +58,14 @@ message of the session; `DESIGN.md` reconciles it with the code.
 
 The shipped app provisions the Python backend into
 `~/Library/Application Support/MeetingNotes/runtime` on first run. `runtimeVersion` in
-`app/Sources/MeetingNotesCore/Provisioner.swift` (currently **"24"**) is a marker: bump it
-whenever backend code changes so the installed app re-provisions and picks up the new
-backend. **App-only changes need no bump; any backend change does.** A stale runtime silently
-runs old backend code — the source of several "why isn't my fix working" moments this
-session. The provisioner installs `backend[pipeline,embeddings]` extras.
+`app/Sources/MeetingNotesCore/Provisioner.swift` (currently **"37"**, with a dated changelog
+comment per version) is a marker: bump it whenever backend code changes so the installed app
+re-provisions and picks up the new backend. **App-only changes need no bump; any backend change
+does.** A stale runtime silently runs old backend code — the source of many "why isn't my fix
+working" moments; the usual real cause was simply that the fixed DMG had not been installed.
+The provisioner installs `backend[pipeline,embeddings]` extras. The `.provisioned` marker file
+holds the version last installed; check it against `runtimeVersion` to tell whether an install
+took.
 
 ## Current state: everything implemented
 
@@ -134,18 +142,143 @@ plus a long tail of enhancements from a week of real use. Notable subsystems:
 - Granola's local cache (`~/Library/Application Support/Granola/cache-v6.json.enc`) is
   encrypted with a custom AES scheme; the official **CSV export** (Settings→Profile→Generate
   CSV) is the supported import path — do not try to decrypt the cache.
+- **Build hygiene (bit us):** `make dmg` runs an *incremental* `swift build -c release`. After
+  bumping `runtimeVersion` the incremental release build embedded the *old* version in the
+  binary (the bundled Python was fresh, so fixes still deployed, but provisioning wrote the wrong
+  marker and the app thought it was already up to date). Fix: `rm -rf app/.build` before
+  `make dmg` when the runtime changed, and verify the `.provisioned` marker equals the new
+  `runtimeVersion` after installing.
+- **Installing the fix is a separate step from shipping it.** Repeatedly this session, "still
+  broken" meant the fixed DMG was built and pushed but not installed. To install for the user:
+  `osascript -e 'quit app "Polenta Meeting Notes"'`, replace `/Applications/Polenta Meeting
+  Notes.app` with `dist/Polenta Meeting Notes.app`, `open` it. A backend bump then re-provisions
+  on launch (watch `.provisioned`). Verify the running venv code, not just the bundle:
+  `~/Library/Application Support/MeetingNotes/runtime/venv` is what actually runs.
+- **`AVAudioEngine.installTapOnBus` throws an uncatchable Obj-C NSException** on a bad/mismatched
+  mic format; catch it via the `ObjCSupport.ObjCTryCatch` shim and validate formats first
+  (see the AirPods crash fix). Swift `try/catch` cannot catch it.
+
+## Session log — everything done since the app first shipped (runtime 24 → 37)
+
+Chronological, grouped by theme. Each landed as its own commit with tests; the fast gate and
+(where relevant) the pipeline tier stayed green. Runtime numbers in brackets; "app-only" means
+no runtime bump.
+
+**Repo / distribution**
+- Pushed the whole project to `github.com/martfo/polenta-meeting-notes` (GPLv3, public).
+  Reconciled the repo's existing LICENSE + short README on first push. Repo description and
+  topics updated; README rewritten for the current feature set.
+
+**ffmpeg removed [25]** — `pipeline/audio_io.py` (`load_audio_16k_mono`) reads audio with the
+stdlib `wave` module into the float32 mono 16 kHz array WhisperX wants; diarisation is handed a
+preloaded ndarray so pyannote never decodes a file; `afconvert` converts anything off-format.
+`BackendSupervisor` no longer patches Homebrew onto PATH. Confirmed on the pipeline tier.
+
+**Transcript quality (the big arc — Granola A/B on real meetings)**
+- **Dual-channel timeline common clock [app-only]** — `AudioMixer.place` + `HostClock` +
+  `SystemAudioTap` now place each buffer at its true host time on one shared origin (the
+  callbacks used to discard the timestamps and concat positionally), so mic.wav and system.wav
+  stay the same length and merge correctly. Fixed the "one speaker's turns piled at the end".
+- **Vocabulary prompt [25]** — `pipeline/vocabulary.py` builds a Whisper `initial_prompt` from
+  owner + calendar attendees + `config.glossary`; applied to both channels; model reloads on
+  change. Rescues mis-heard names (Nisha vs "Misha") and domain terms.
+- **AirPods sample-rate mislabel — the real remote-loss cause [app-only]** — the tap read its
+  rate once at start; when AirPods' mic engages the output device drops rate mid-call, so every
+  buffer was resampled ~2x too fast into chirp that Whisper's VAD rejects (remote side vanished,
+  hallucinated "Thanks for watching"). `SampleRateEstimator` measures the true rate per buffer
+  from sample-time vs host-time deltas. **Confirmed on a real AirPods call** (remote side
+  recovered; centroid ~860 Hz vs ~3000 Hz when broken). Diagnostic: pitch/spectral check +
+  stretch-and-transcribe on `system.wav`.
+- **Loudness normalisation [26]** — `normalize.py` targets voiced RMS with a limiter instead of
+  scaling by peak. Kept as a genuine robustness gain, but was NOT the remote-loss fix.
+- **Idempotent enrich [27]** — enrich clears a meeting's `meeting_speakers` rows before
+  recording fresh clusters, so Retry can reprocess a ready meeting (needed to re-run repaired
+  audio) instead of failing the UNIQUE constraint.
+- Two damaged historical meetings were recovered offline (de-gap + 2x stretch `system.wav`,
+  re-run) back to Granola parity.
+
+**Speed / GPU**
+- **distil-large-v3 [29]** — English-only distillation of large-v3; ~2x faster on CPU, better
+  punctuation, no accuracy loss (verified on the fixture).
+- **Diarisation, embedding, alignment on the Apple GPU (MPS) [30]** — `pipeline/device.py`
+  selects `mps` with `PYTORCH_ENABLE_MPS_FALLBACK=1` and a `MEETINGNOTES_FORCE_CPU` escape
+  hatch. Benchmarked ~20x faster diarisation with identical speaker output. Transcription stays
+  CPU-bound (CTranslate2 has no Metal — see open items for the MLX lever).
+- **GPU meta-tensor fallback [31]** — a real run hit an uncatchable-looking meta-tensor error
+  moving the wav2vec2 align model to MPS; couldn't reproduce it in isolation, so alignment,
+  diarisation, and embedding each try the GPU and retry once on CPU on any failure, remembering
+  the working device. Verified by injecting the exact error.
+- **Transcription CPU threads [37]** — whisperx defaulted to 4 CPU threads; the engine now uses
+  `min(os.cpu_count(), 12)`. Benchmarked ~2x faster on real audio (12 = sweet spot, no gain past
+  it, memory-bandwidth bound). A 5-hour import dropped from ~49 min to ~24.
+
+**Import**
+- **Granola CSV import fixed for the real export [28]** — maps `document_created`,
+  `workspace_name`, and the separate `notes` column (was swallowed by the summary).
+- **Import any audio file [34]** — Settings → Import, or **drag-and-drop onto the window**
+  (with a confirm). Any format `afconvert` reads (mp3/m4a/wav) is converted to the vault's
+  16 kHz mono and run through the single-channel pipeline. Shared code path with the picker.
+- **Filename date on import [35]** — `jobs/filename_date.py` reads a date/time out of names like
+  `2026-08-19 14-30.m4a` or `20260819_143000.mp3` (day-first when ambiguous) and files the
+  meeting under that day. Captures are untouched.
+- **Adjustable recorded date [36]** — a date picker in the meeting header; `PUT
+  /meetings/{id}/date` updates the `started_at` column + `meeting.md` front matter (the id/folder
+  name is deliberately left as-is). Fixes imports filed on the wrong day.
+
+**LLM / summaries / folders**
+- **Summary prompt hardening [25-ish]** — never attribute points/actions to placeholder or
+  channel labels (Me, Unassigned, Speaker N, diarisation labels).
+- **Pending summaries auto-resume [33]** — the worker sweeps for `ready/pending` meetings when
+  idle and re-enqueues them once LM Studio is reachable (`enqueue_pending_summaries`, throttled).
+  Note: LM Studio can report a model "loaded" while chat still 500s ("Failed to resolve model
+  metadata") — reloading the model in LM Studio fixes it. The sweep gate uses model-loaded, so
+  it retries harmlessly until chat truly works.
+- **Folder suggestion learns from filing** — the prompt lists each folder's example titles.
+- **Folder suggestion cached [32]** — `suggested_folder` column; precomputed after summarising
+  and served from cache (the LLM call is ~16s on a large model).
+- **No generic catch-all folders [37]** — the prompt used to say "give it a short, general
+  name", which made the model literally invent "General"/"Uncategorized". Prompt now prefers
+  existing folders and forbids catch-alls; `parse_suggestion` drops generic new-folder names as
+  a guard. Junk cached suggestions were cleared from the live vault.
+
+**UI / app**
+- New app icon (from `New Icon/` iconset).
+- Summary is selectable without Edit — the detail screen polled the meeting every 2s and
+  re-rendered, wiping the selection; now it stops polling once settled and only republishes a
+  changed detail.
+- Recording time shown in the Date view; right-click context menu on library rows
+  (Reveal/Regenerate/Delete); folder + date grouping.
+- HF token pre-filled from the Keychain on the first-run screen (it reappears after a runtime
+  bump; `KeychainTokenStore.load`).
+- **Find and replace across a meeting's summary and notes** — three-dots menu → sheet;
+  `MeetingNotesCore.TextReplace`.
+- **Audio-aware auto-stop** — see the Calendar bullet in "Current state".
+- **AirPods installTap crash fix [app-only]** — starting a recording could abort the app:
+  `AVAudioEngine.installTapOnBus` raises an uncatchable NSException when the mic format is
+  invalid or disagrees with the hardware (AirPods rate switch). Fixed two ways: validate the
+  input/output formats agree and install with a `nil` tap format, and wrap the call in a small
+  Objective-C try/catch shim (`app/Sources/ObjCSupport`, `ObjCTryCatch`) so anything that slips
+  through degrades to system-audio-only instead of crashing.
 
 ## Pending / open
 
-- ~~**Task #13 (sign-off blocker)**: remove the manual ffmpeg dependency.~~ **Done** (runtime
-  25): WhisperX/pyannote are fed preloaded arrays via `pipeline/audio_io.py`, with afconvert
-  for non-16k-mono imports. No bundled binary. Still wants a real-call [pipeline]-tier run to
-  confirm diarisation accepts the preloaded array on the installed whisperx.
+- **GPU transcription (MLX) — the biggest remaining speed win.** Transcription is the only
+  CPU-bound stage (faster-whisper's CTranslate2 has no Metal backend; diarisation/embedding
+  already run on the GPU). The user imports very long recordings (one was 5 hours), so this is
+  the real lever. Swapping the transcribe step to an Apple-GPU engine (MLX Whisper) would likely
+  be several times faster again. It is a proper engine swap (new runtime dependency, re-wire
+  transcribe/align keeping pyannote diarisation, full pipeline-tier testing). Discussed and
+  deferred; distil + more threads was the low-risk interim.
+- ~~**Task #13**: remove the ffmpeg dependency.~~ **Done** (runtime 25), confirmed on the
+  pipeline tier.
 - **Task #14**: enrolment management screen (Phase 2.3 UI) — backend module
   `enrolment/management.py` is built and tested; the SwiftUI screen + endpoints are not.
-- **Model choice**: default guidance is Qwen3-30B-A3B-Instruct in LM Studio; a larger model
-  (dense 70B or bigger MoE) would improve summary attribution/faithfulness. App is
-  model-agnostic — just load a different model. Worth A/B-ing on real meetings.
+- **Optional follow-ups the user raised**: library-wide find/replace (fix a name across every
+  meeting, not just one); cleaning up the meeting title when an imported filename is purely a
+  timestamp; renaming the on-disk folder when the recorded date changes (currently the id/folder
+  stays put, only the displayed date moves).
+- **Model choice**: the user runs a large Qwen instruct model in LM Studio. App is
+  model-agnostic. A non-thinking instruct model gives the cleanest strict-JSON folder replies.
 
 ## Verification caveats (I cannot test these here)
 
@@ -155,28 +288,34 @@ normalisation, mid-recording input switching, auto-stop timing, and the global h
 another app is focused. The Console subsystem for capture/tap diagnostics is
 `co.uk.designturbine.meetingnotes`.
 
-Added this session, still needing a real call:
-- **Timeline common-clock fix** (`AudioMixer.place` + `CaptureController`/`SystemAudioTap`):
-  confirm mic.wav and system.wav come out the same length and the merged transcript interleaves
-  correctly (no "monologue at the end"). If `system.wav` is still shorter than the meeting, the
-  tap is dropping quiet remote audio — a capture-gain problem, not the merge (see below).
-- **Vocabulary prompt** confirm WhisperX accepts `asr_options={"initial_prompt": ...}` on the
-  installed version and that reload-on-prompt-change works; check names/terms land in the text.
-- **Remote-channel capture — root cause found and fixed, needs a real AirPods call to
-  confirm.** The tap read its sample rate once at start; when AirPods' mic engages, the output
-  drops to a lower rate mid-call, so every buffer was resampled ~2x too fast into chirp that
-  Whisper's VAD rejects — the remote side vanished and Whisper hallucinated "Thanks for
-  watching"-style segments from the near-silence. Proven by stretching the stand-up's
-  system.wav 2x: 228 real words appeared where 1x gave 2. Fixed with `SampleRateEstimator`
-  (per-buffer rate from sample-time vs host-time deltas, switches adopted immediately and
-  logged under `co.uk.designturbine.meetingnotes`). Verify: record a call on AirPods, check
-  system.wav transcribes and the log shows the rate switch. Old broken meetings are repairable
-  offline (de-gap, 2x stretch, halve timestamps, re-run transcription).
+**Now confirmed on real calls / the pipeline tier** (were caveats earlier this session):
+- ffmpeg removal, vocabulary prompt (`asr_options`), and MPS diarisation/embedding — green on
+  `make pipeline`.
+- AirPods rate fix + the timeline common clock — a real AirPods call recovered the remote side
+  (healthy `system.wav`, natural speech), and imported real meetings summarise at Granola parity.
+- distil transcription, the CPU-thread speedup, folder-suggestion caching, filename-date import,
+  adjustable date, pending-summary resume, and the installTap crash fix are all installed and
+  running (runtime 37 verified live in the vault's venv).
+
+**Still genuinely unverified / worth watching:**
+- The installTap crash fix's worst case is untestable off the exact device state; the Obj-C
+  catch is a hard guarantee it can no longer abort, but the degradation (system-audio-only when
+  the mic can't be tapped) has not been exercised.
+- Mid-recording input switching and the global hotkey while another app is focused remain
+  logic-tested only.
 
 ## User environment specifics
 
-- Vault: `/Users/dtrb/Work/Meeting Vault`.
-- macOS with Homebrew ffmpeg installed; AirPods often the input.
+- Vault: `/Users/dtrb/Work/Meeting Vault`. `config.json` there has `owner_name: "Martin"` and a
+  `glossary` of the user's recurring names/terms; folders in use: DP, DesignTurbine, EON,
+  Ocorian. The user imports long recordings (some multi-hour) named by date/time.
+- macOS on an **M3 Ultra (20 P-cores, 60-core GPU, 256 GB)**; AirPods often the input. ffmpeg is
+  no longer required (removed in runtime 25) — do not reintroduce a dependency on it.
+- Installed app is **runtime 37** (verified: `.provisioned` marker = 37, venv code current).
 - HF token stored in Keychain (service `MeetingNotes`, account `huggingface-token`).
-- git identity is set repo-local (Martin / martin@designturbine.co.uk).
-- Commit trailer convention: `Co-Authored-By: Claude ...`.
+- git identity is set repo-local (Martin / martin@designturbine.co.uk); remote is
+  `github.com/martfo/polenta-meeting-notes` over gh HTTPS (the SSH key is not authorised — use
+  the gh credential helper / HTTPS remote).
+- Commit trailer convention: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+- The user's workflow this session: implement → `make gate` → `make dmg` → commit → push, then
+  (often) install the DMG for them. Push only when asked; they gate pushes explicitly.
