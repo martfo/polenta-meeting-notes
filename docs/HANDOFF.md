@@ -2,9 +2,11 @@
 
 A running summary for continuing work in a fresh Claude Code session. Pair this with
 `DESIGN.md` (the pinned source of truth for schemas, formats, and architecture) and the git
-log (85 commits, each a self-contained slice with its own tests). **Current runtime version is
-37**; HEAD is on `main`, pushed to `github.com/martfo/polenta-meeting-notes`. See the "Session
-log" section below for everything done since the app first shipped (runtime 24 → 37).
+log (88 commits, each a self-contained slice with its own tests). **Current runtime version is
+37**; HEAD is on `main` (`e0e5c4e`), pushed to `github.com/martfo/polenta-meeting-notes`. See
+the "Session log" section below for everything done since the app first shipped (runtime
+24 → 37). This doc is maintained by the `handoff` skill (`.claude/skills/handoff/`; a generic
+copy in `~/.claude/skills/handoff/` covers the user's other projects).
 
 ## What this is
 
@@ -259,6 +261,16 @@ preloaded ndarray so pyannote never decodes a file; `afconvert` converts anythin
   input/output formats agree and install with a `nil` tap format, and wrap the call in a small
   Objective-C try/catch shim (`app/Sources/ObjCSupport`, `ObjCTryCatch`) so anything that slips
   through degrades to system-audio-only instead of crashing.
+- **Library list performance [app-only]** — selecting/scrolling a large library (121 meetings)
+  was sluggish. Cause: the right-click feature attached a `.contextMenu` to every row, a heavy
+  per-row cost in a SwiftUI `List` that also rebuilds on each selection change. Replaced with a
+  single list-level `.contextMenu(forSelectionType: String.self)` per list, built lazily only
+  on right-click (same Reveal/Regenerate/Delete actions and confirmations). Diagnosis first
+  ruled out the backend (detail fetch ~4ms) and the folder-suggestion LLM (only 1 of 121
+  meetings is unfiled). Installed and confirmed. If the list still drags, the remaining suspect
+  is the whole `LibraryList` re-rendering on selection because it observes the shared `AppModel`.
+- **`handoff` skill added** — `.claude/skills/handoff/` (project, Polenta-specific) and
+  `~/.claude/skills/handoff/` (account-wide, generic) codify how to keep this doc current.
 
 ## Pending / open
 
@@ -294,8 +306,9 @@ another app is focused. The Console subsystem for capture/tap diagnostics is
 - AirPods rate fix + the timeline common clock — a real AirPods call recovered the remote side
   (healthy `system.wav`, natural speech), and imported real meetings summarise at Granola parity.
 - distil transcription, the CPU-thread speedup, folder-suggestion caching, filename-date import,
-  adjustable date, pending-summary resume, and the installTap crash fix are all installed and
-  running (runtime 37 verified live in the vault's venv).
+  adjustable date, pending-summary resume, the installTap crash fix, and the library-list
+  performance fix are all installed and running (runtime 37 verified live in the vault's venv;
+  installed app binary matches the latest build).
 
 **Still genuinely unverified / worth watching:**
 - The installTap crash fix's worst case is untestable off the exact device state; the Obj-C
