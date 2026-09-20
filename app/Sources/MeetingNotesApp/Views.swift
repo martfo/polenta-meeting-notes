@@ -643,6 +643,7 @@ struct LibraryList: View {
             }
         }
         .listStyle(.sidebar)
+        .contextMenu(forSelectionType: String.self) { rowMenu(for: $0) }
         .refreshable { await model.refreshLibrary() }
         .task { await model.refreshLibrary() }
     }
@@ -671,6 +672,7 @@ struct LibraryList: View {
             }
         }
         .listStyle(.sidebar)
+        .contextMenu(forSelectionType: String.self) { rowMenu(for: $0) }
         .refreshable { await model.refreshLibrary() }
     }
 
@@ -702,39 +704,48 @@ struct LibraryList: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        .contextMenu { rowMenu(meeting) }
     }
 
-    /// The same actions as the meeting view's three-dots menu. The row does
-    /// not carry the vault path or the edited flag, so those are fetched on
-    /// demand; the confirmations match the detail screen's exactly.
+    /// The row actions, as one list-level context menu keyed on the right-clicked
+    /// item. This replaces a per-row `.contextMenu`, which is a heavy per-row
+    /// cost that made selecting and scrolling a large library sluggish; the
+    /// list-level menu is built lazily only when a row is actually right-clicked.
+    /// The row does not carry the vault path or the edited flag, so those are
+    /// fetched on demand; the confirmations match the detail screen's exactly.
     @ViewBuilder
-    private func rowMenu(_ meeting: MeetingSummaryRow) -> some View {
-        Button("Reveal in Finder") {
-            Task {
-                if let detail = try? await model.client.meeting(meeting.id) {
-                    model.revealInFinder(path: detail.reveal_path)
+    private func rowMenu(for ids: Set<String>) -> some View {
+        if let id = ids.first, let meeting = meetingByID(id) {
+            Button("Reveal in Finder") {
+                Task {
+                    if let detail = try? await model.client.meeting(id) {
+                        model.revealInFinder(path: detail.reveal_path)
+                    }
                 }
             }
-        }
-        Button("Regenerate summary") {
-            Task {
-                guard let detail = try? await model.client.meeting(meeting.id) else { return }
-                if detail.summary_edited == 1 {
-                    pendingRegenerateID = meeting.id
-                } else {
-                    try? await model.client.regenerateSummary(meeting.id)
-                    await model.refreshLibrary()
+            Button("Regenerate summary") {
+                Task {
+                    guard let detail = try? await model.client.meeting(id) else { return }
+                    if detail.summary_edited == 1 {
+                        pendingRegenerateID = id
+                    } else {
+                        try? await model.client.regenerateSummary(id)
+                        await model.refreshLibrary()
+                    }
                 }
             }
+            // No transcript to summarise yet while the recording is still being
+            // captured or transcribed; the detail menu disables on the same rule.
+            .disabled(["recording", "queued", "transcribing"].contains(meeting.processing_status))
+            Divider()
+            Button("Delete meeting", role: .destructive) { pendingDelete = meeting }
         }
-        // No transcript to summarise yet while the recording is still being
-        // captured or transcribed; the detail menu disables on the same rule.
-        .disabled(["recording", "queued", "transcribing"].contains(meeting.processing_status))
-        Divider()
-        Button("Delete meeting", role: .destructive) {
-            pendingDelete = meeting
+    }
+
+    private func meetingByID(_ id: String) -> MeetingSummaryRow? {
+        for group in model.library {
+            if let meeting = group.meetings.first(where: { $0.id == id }) { return meeting }
         }
+        return nil
     }
 }
 
