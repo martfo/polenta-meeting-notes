@@ -150,7 +150,8 @@ def create_app(state: AppState) -> FastAPI:
             raise HTTPException(404, f"no file at {request.path}")
         try:
             meeting_id = import_transcript_file(
-                conn, vault, source_path, title=request.title)
+                conn, vault, source_path, title=request.title,
+                owner_name=state.config.owner_name)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         state.worker.notify()

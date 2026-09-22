@@ -294,11 +294,12 @@ struct SettingsSheet: View {
                         .disabled(importing)
                     } label: {
                         Label("Import a transcript", systemImage: "doc.text")
-                        Text("Bring in a transcript that is already written up "
-                             + "(markdown or text, from this app or another tool). "
-                             + "It is read into speaker turns and summarised; there is "
-                             + "no audio to transcribe. You can also drag one onto the "
-                             + "window.")
+                        Text("Bring in a transcript that is already written up: "
+                             + "markdown, text, or a subtitle export (vtt, srt), "
+                             + "from this app, Granola, Teams, Otter, or another "
+                             + "tool. It is read into speaker turns and summarised; "
+                             + "there is no audio to transcribe. You can also drag "
+                             + "one onto the window.")
                     }
                     LabeledContent {
                         Button(importing ? "Importing…" : "Choose CSV…") { chooseGranolaCSV() }

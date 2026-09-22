@@ -4,6 +4,7 @@ from datetime import datetime
 
 from meetingnotes.storage.transcript import render_transcript
 from meetingnotes.tools.transcript_text import (
+    apply_owner_label,
     parse_markdown_transcript,
     split_front_matter,
     transcript_duration_s,
@@ -151,3 +152,110 @@ def test_duration_comes_only_from_real_timestamps():
 
     untimed = parse_markdown_transcript("Ben Adams: One.\nRoger Neel: Two.")
     assert transcript_duration_s(untimed.segments) is None
+
+
+# -- other tools' exports --------------------------------------------------
+
+def test_granola_style_me_and_them_lines():
+    """Granola writes the person recording as "Me"; the other side is named."""
+    parsed = parse_markdown_transcript(
+        "Me: Shall we start with the renewal?\n"
+        "Ben Adams: Yes, the terms are unchanged.\n"
+        "Me: Good.\n")
+    assert [s.speaker for s in parsed.segments] == ["Me", "Ben Adams", "Me"]
+
+    named = apply_owner_label(parsed.segments, "Martin")
+    assert [s.speaker for s in named] == ["Martin", "Ben Adams", "Martin"]
+
+
+def test_a_name_and_time_on_its_own_line_opens_the_turn():
+    """Otter, Teams, and Fireflies write the speaker and the time as a
+    heading, with the words beneath it."""
+    parsed = parse_markdown_transcript(
+        "Ben Adams   0:04\n"
+        "We reviewed the budget this morning.\n"
+        "It came in under plan.\n"
+        "\n"
+        "Roger Neel (1:12)\n"
+        "Good. I will circulate the figures.\n")
+    assert [s.speaker for s in parsed.segments] == ["Ben Adams", "Roger Neel"]
+    assert [s.start for s in parsed.segments] == [4.0, 72.0]
+    assert parsed.segments[0].text == (
+        "We reviewed the budget this morning. It came in under plan.")
+
+
+def test_a_name_with_the_time_in_brackets_on_one_line():
+    parsed = parse_markdown_transcript(
+        "Ben Adams (00:00:04): We reviewed the budget.\n"
+        "Roger Neel [00:01:12]: Noted.\n")
+    assert [s.speaker for s in parsed.segments] == ["Ben Adams", "Roger Neel"]
+    assert [s.start for s in parsed.segments] == [4.0, 72.0]
+
+
+SRT = """1
+00:00:04,000 --> 00:00:07,500
+Ben Adams: We reviewed the budget this morning.
+
+2
+00:00:07,600 --> 00:00:09,000
+It came in under plan.
+
+3
+00:01:12,000 --> 00:01:14,000
+Roger Neel: Noted, thank you.
+"""
+
+
+def test_a_subrip_export_reads_as_speech():
+    """Consecutive cues from one speaker are one turn, with real times."""
+    parsed = parse_markdown_transcript(SRT)
+    assert [s.speaker for s in parsed.segments] == ["Ben Adams", None, "Roger Neel"]
+    assert parsed.segments[0].start == 4.0
+    assert parsed.segments[0].end == 7.5
+    assert parsed.segments[2].start == 72.0
+    # The renderer groups the run, so the caption split does not show.
+    rendered = render_transcript(parsed.segments)
+    assert "**[00:00:04] Ben Adams**" in rendered
+    assert "**[00:01:12] Roger Neel**" in rendered
+
+
+VTT = """WEBVTT
+
+NOTE recorded by a meeting tool
+
+00:00:04.000 --> 00:00:07.500
+<v Ben Adams>We reviewed the budget this morning.</v>
+
+00:01:12.000 --> 00:01:14.000
+<v Roger Neel>Noted, thank you.</v>
+"""
+
+
+def test_a_webvtt_export_uses_its_voice_spans():
+    parsed = parse_markdown_transcript(VTT)
+    assert [s.speaker for s in parsed.segments] == ["Ben Adams", "Roger Neel"]
+    assert [s.text for s in parsed.segments] == [
+        "We reviewed the budget this morning.", "Noted, thank you."]
+    assert parsed.segments[1].start == 72.0
+
+
+def test_cue_numbers_are_not_mistaken_for_speech():
+    """A SubRip cue number is recognised by the time line under it, so it is
+    dropped, while a spoken line that is only a number is kept."""
+    parsed = parse_markdown_transcript(SRT)
+    assert parsed.segments[0].text == "We reviewed the budget this morning."
+    assert all(not s.text.strip().isdigit() for s in parsed.segments)
+
+    spoken = parse_markdown_transcript(
+        "1\n00:00:04,000 --> 00:00:06,000\nBen Adams: How many?\n\n"
+        "2\n00:00:06,000 --> 00:00:07,000\n42\n")
+    assert spoken.segments[-1].text == "42"
+
+
+def test_a_cue_file_keeps_a_real_duration():
+    assert transcript_duration_s(parse_markdown_transcript(SRT).segments) == 74
+
+
+def test_short_timestamps_without_hours_are_minutes_and_seconds():
+    parsed = parse_markdown_transcript("[5:30] Ben Adams: Half past five in.\n")
+    assert parsed.segments[0].start == 330.0

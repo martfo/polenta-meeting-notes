@@ -214,3 +214,31 @@ def test_speaker_names_survive_a_reimport_of_the_rendered_transcript(conn, vault
 
     second = import_transcript_text(conn, vault, rendered, filename="renewal-again.md")
     assert vault.transcript_path(second).read_text() == rendered
+
+
+def test_a_granola_style_transcript_gets_the_owners_name(conn, vault):
+    """"Me" is whoever recorded it. The summary prompt ignores placeholder
+    labels, so their points would be lost without their real name."""
+    meeting_id = import_transcript_text(
+        conn, vault,
+        "Me: Shall we start with the renewal?\nBen Adams: Yes, unchanged.\n",
+        filename="granola-export.md", owner_name="Martin")
+
+    transcript = vault.transcript_path(meeting_id).read_text()
+    assert "Martin**" in transcript and "Me**" not in transcript
+    names = [r["display_name"] for r in conn.execute(
+        "SELECT * FROM meeting_speakers WHERE meeting_id = ? ORDER BY id", (meeting_id,))]
+    assert names == ["Martin", "Ben Adams"]
+
+
+def test_a_subtitle_export_imports_as_a_meeting(conn, vault, tmp_path):
+    path = tmp_path / "Team sync.vtt"
+    path.write_text(
+        "WEBVTT\n\n00:00:04.000 --> 00:00:08.000\n<v Ben Adams>Morning all.</v>\n\n"
+        "00:02:00.000 --> 00:02:04.000\n<v Roger Neel>Morning.</v>\n")
+
+    meeting_id = import_transcript_file(conn, vault, path)
+    row = m.get_meeting(conn, meeting_id)
+    assert row["title"] == "Team sync"
+    assert row["duration_s"] == 124
+    assert "**[00:00:04] Ben Adams**" in vault.transcript_path(meeting_id).read_text()

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from datetime import datetime
 from typing import Any
 
@@ -43,11 +44,34 @@ _MARKER = re.compile(r"^\s*(?:[-*+]\s+|>\s?|\d{1,3}[.)]\s+)")
 _RULE = re.compile(r"^\s*(?:[-*_]\s*){3,}$")
 
 
+# A whole line that is only a speaker and a time, as Otter, Teams, and
+# Fireflies write it: "Ben Adams   0:04", "Ben Adams (00:00:04)".
+_SPEAKER_TIME_LINE = re.compile(
+    r"^(?P<speaker>[^:\[\](){}]{1,40}?)[ \t]+[\[(]?"
+    r"(?P<ts>\d{1,2}:\d{2}(?::\d{2})?)[\])]?[ \t]*:?[ \t]*$")
+# The same on one line with the words: "Ben Adams (00:00:04): hello".
+_SPEAKER_TIME_INLINE = re.compile(
+    r"^(?P<speaker>[^:\[\](){}]{1,40}?)[ \t]*[\[(]"
+    r"(?P<ts>\d{1,2}:\d{2}(?::\d{2})?)[\])][ \t]*:?[ \t]+(?P<text>\S.*)$")
+
+# Subtitle cues, as an .srt or .vtt export gives them.
+_CUE_TIME = re.compile(
+    r"^\s*(?P<start>\d{1,3}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?)\s*-->\s*"
+    r"(?P<end>\d{1,3}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?)")
+# WebVTT names its speaker in a voice span: "<v Ben Adams>hello</v>".
+_VOICE = re.compile(r"^<v[ \t]+(?P<speaker>[^>]{1,40})>(?P<text>.*?)(?:</v>)?\s*$")
+_CUE_INDEX = re.compile(r"^\d{1,6}$")
+
+
 def _ts_to_seconds(ts: str) -> float:
-    parts = [int(p) for p in ts.split(":")]
-    if len(parts) == 2:
-        return parts[0] * 60 + parts[1]
-    return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    ts = ts.replace(",", ".")
+    parts = ts.split(":")
+    seconds = float(parts[-1])
+    if len(parts) >= 2:
+        seconds += int(parts[-2]) * 60
+    if len(parts) == 3:
+        seconds += int(parts[0]) * 3600
+    return seconds
 
 
 def parse_transcript(text: str) -> list[Segment]:
@@ -201,6 +225,96 @@ class _TurnBuilder:
         self.segments[-1] = last.model_copy(update={"text": f"{last.text} {text}".strip()})
 
 
+def looks_like_cues(text: str) -> bool:
+    """A WebVTT or SubRip export, rather than a written document."""
+    head = text.lstrip("\ufeff").lstrip()
+    if head.upper().startswith("WEBVTT"):
+        return True
+    return any(_CUE_TIME.match(line) for line in text.split("\n")[:40])
+
+
+def parse_cue_transcript(text: str) -> list[Segment]:
+    """Parse .vtt or .srt cues into segments.
+
+    A cue's speaker comes from a WebVTT voice span or from a "Name:" opening,
+    and its real start and end times are kept. Consecutive cues from one
+    speaker render as a single turn, so a subtitle file reads as speech rather
+    than as a list of captions.
+    """
+    lines = text.replace("\r\n", "\n").split("\n")
+    segments: list[Segment] = []
+    speaker: str | None = None
+    start = end = 0.0
+    pending: list[str] = []
+
+    def flush() -> None:
+        nonlocal pending
+        body = " ".join(pending).strip()
+        pending = []
+        if body:
+            segments.append(Segment(start=start, end=end, speaker=speaker, text=body))
+
+    def is_index(position: int, line: str) -> bool:
+        """A SubRip cue number: a bare number whose next line times the cue.
+        Checked by what follows, because a spoken line can be a number too."""
+        if not _CUE_INDEX.match(line):
+            return False
+        for following in lines[position + 1:]:
+            if following.strip():
+                return bool(_CUE_TIME.match(following.strip()))
+        return False
+
+    for position, raw_line in enumerate(lines):
+        line = raw_line.strip()
+        if not line or line.upper().startswith("WEBVTT") or line.startswith("NOTE "):
+            continue
+        cue = _CUE_TIME.match(line)
+        if cue:
+            flush()
+            start = _ts_to_seconds(cue.group("start"))
+            end = _ts_to_seconds(cue.group("end"))
+            speaker = None
+            continue
+        if is_index(position, line):
+            flush()
+            continue
+        voice = _VOICE.match(line)
+        if voice:
+            speaker = voice.group("speaker").strip()
+            line = voice.group("text").strip()
+            if not line:
+                continue
+        elif not pending:
+            turn = _TURN.match(line)
+            if turn and turn.group("speaker") and _plausible_speaker(turn.group("speaker")):
+                speaker = turn.group("speaker").strip()
+                line = turn.group("text").strip()
+        # Cue markup that carries no words of its own.
+        line = re.sub(r"</?[a-zA-Z][^>]*>", "", line).strip()
+        if line:
+            pending.append(line)
+    flush()
+    return segments
+
+
+def apply_owner_label(segments: list[Segment], owner_name: str | None) -> list[Segment]:
+    """Rename a first-person speaker label to the owner's name.
+
+    Granola and others write the person recording as "Me". The summary is
+    told never to attribute anything to a placeholder label, so an imported
+    transcript full of "Me" would lose that speaker's points; their real name
+    keeps them.
+    """
+    if not owner_name:
+        return segments
+    placeholders = {"me", "myself", "owner", "host (me)"}
+    for index, segment in enumerate(segments):
+        label = (segment.speaker or "").strip().lower()
+        if label in placeholders:
+            segments[index] = segment.model_copy(update={"speaker": owner_name})
+    return segments
+
+
 def parse_markdown_transcript(text: str) -> ParsedTranscript:
     """Parse a written transcript document into segments plus whatever title,
     date, and attendees it declared.
@@ -225,6 +339,11 @@ def parse_markdown_transcript(text: str) -> ParsedTranscript:
                 result.started_at = parsed
                 break
     result.attendees = _attendees(front)
+
+    # A subtitle export is a different shape altogether and is parsed as cues.
+    if looks_like_cues(body):
+        result.segments = parse_cue_transcript(body)
+        return result
 
     builder = _TurnBuilder()
     # An explicitly headed transcript section (## Transcript) means the prose
@@ -261,6 +380,18 @@ def parse_markdown_transcript(text: str) -> ParsedTranscript:
             continue
 
         stripped = _MARKER.sub("", line).strip()
+        # "Ben Adams   0:04" on its own line, then the words beneath it.
+        heading_line = _SPEAKER_TIME_LINE.match(stripped)
+        if heading_line and _plausible_speaker(heading_line.group("speaker")):
+            builder.open(heading_line.group("speaker").strip(),
+                         heading_line.group("ts"), "")
+            continue
+        inline = _SPEAKER_TIME_INLINE.match(stripped)
+        if inline and _plausible_speaker(inline.group("speaker")):
+            builder.open(inline.group("speaker").strip(), inline.group("ts"),
+                         inline.group("text").strip())
+            continue
+
         if not stripped:
             continue
         turn = _TURN.match(stripped)
@@ -295,3 +426,35 @@ def transcript_duration_s(segments: list[Segment]) -> int | None:
     if last.end <= len(segments) + 1:
         return None
     return int(last.end)
+
+
+def _main() -> None:
+    """Dry-run a file through the parser and print what it found, without
+    importing anything. The way to check an unfamiliar export before trusting
+    it: `python -m meetingnotes.tools.transcript_text <file>`."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Show how a transcript file would be read, importing nothing.")
+    parser.add_argument("path")
+    parser.add_argument("--turns", type=int, default=6, help="how many turns to show")
+    args = parser.parse_args()
+
+    parsed = parse_markdown_transcript(Path(args.path).read_text(errors="replace"))
+    speakers = list(dict.fromkeys(s.speaker for s in parsed.segments if s.speaker))
+    print(f"title:     {parsed.title or '(from the filename)'}")
+    print(f"date:      {parsed.started_at or '(from the filename, else today)'}")
+    print(f"attendees: {', '.join(parsed.attendees) or '(none declared)'}")
+    print(f"speakers:  {', '.join(speakers) or '(none found: it would import as prose)'}")
+    print(f"turns:     {len(parsed.segments)}")
+    print(f"duration:  {transcript_duration_s(parsed.segments) or '(no real timestamps)'}")
+    print()
+    for segment in parsed.segments[:args.turns]:
+        label = segment.speaker or "(unattributed)"
+        print(f"[{segment.start:8.2f}] {label}: {segment.text[:100]}")
+    if len(parsed.segments) > args.turns:
+        print(f"... and {len(parsed.segments) - args.turns} more")
+
+
+if __name__ == "__main__":
+    _main()

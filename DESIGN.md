@@ -142,9 +142,15 @@ A transcript that is already written up can be imported the same two ways (Setti
 or dropped on the window): a markdown or text file becomes a meeting with no audio.
 tools.transcript_text parses the turns, understanding this app's own transcript.md
 ("**[00:01:02] Name**" headings), plain "Name: text" lines with or without leading
-timestamps, YAML front matter (title, date, attendees), and a "## Transcript" section in a
-longer document; prose with no speakers becomes one unattributed turn. A line whose label is
-not name-shaped ("One thing to remember: ...") stays prose. jobs.transcript_import then
+timestamps, a speaker-and-time heading line ("Ben Adams   0:04", "Ben Adams (0:04)") with the
+words beneath it, .vtt and .srt cues (including WebVTT "<v Name>" voice spans, with a SubRip
+cue number recognised by the time line under it), YAML front matter (title, date, attendees),
+and a "## Transcript" section in a longer document; prose with no speakers becomes one
+unattributed turn. A line whose label is not name-shaped ("One thing to remember: ...") stays
+prose. A first-person label ("Me", as Granola writes the person recording) becomes the
+configured owner name, because the summary prompt is told to ignore placeholder labels.
+`python -m meetingnotes.tools.transcript_text <file>` dry-runs the parse and prints what it
+found, for checking an unfamiliar export before importing it. jobs.transcript_import then
 writes segments.json, transcript.md, and meeting.md, and enqueues the job at the embed stage,
 so it runs only the stages that need no audio: the search index and the summary. Timestamps
 that are synthetic (a transcript with none of its own) give no duration rather than a false

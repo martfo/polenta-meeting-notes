@@ -10,6 +10,9 @@ struct ImportKindTests {
         #expect(ImportKind.of(fileExtension: "MD") == .transcript)
         #expect(ImportKind.of(fileExtension: "markdown") == .transcript)
         #expect(ImportKind.of(fileExtension: "txt") == .transcript)
+        // Subtitle exports from other meeting tools are transcripts too.
+        #expect(ImportKind.of(fileExtension: "vtt") == .transcript)
+        #expect(ImportKind.of(fileExtension: "srt") == .transcript)
     }
 
     @Test func audioIsStillAudio() {

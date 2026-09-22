@@ -12,10 +12,13 @@ public enum ImportKind: Equatable, Sendable {
     case audio
     case transcript
 
-    /// Markdown and plain text hold a written transcript. The extensions are
-    /// matched directly as well as through the type system, because a file
-    /// exported by another tool often has no registered type for its suffix.
-    public static let transcriptExtensions: Set<String> = ["md", "markdown", "txt", "text"]
+    /// Markdown, plain text, and subtitle exports all hold a written
+    /// transcript. The extensions are matched directly as well as through the
+    /// type system, because a file exported by another tool often has no
+    /// registered type for its suffix.
+    public static let transcriptExtensions: Set<String> = [
+        "md", "markdown", "txt", "text", "vtt", "srt",
+    ]
 
     public static func of(url: URL) -> ImportKind? {
         of(fileExtension: url.pathExtension)

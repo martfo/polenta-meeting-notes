@@ -65,12 +65,27 @@ Recordings are often named for when they were made, for example `2026-08-19 14-3
 under that day rather than the moment you imported it. If a date cannot be read, or you want to
 correct one, adjust the recorded date from the meeting's detail view and the library re-files it.
 
-Transcripts that are already written up come in the same way. Drag a markdown or text file onto
-the window, or use Settings, Import, and the turns are read into a meeting with no audio: this
-app's own `transcript.md`, a Teams or Zoom export, or anything written as `Ben Adams: ...` lines,
-with or without timestamps. YAML front matter (`title`, `date`, `attendees`) is honoured where it
-is there, and a `## Transcript` section is preferred over the notes around it. Nothing needs
-transcribing, so the meeting goes straight to the search index and the summary.
+Transcripts that are already written up come in the same way. Drag a markdown, text, or subtitle
+file onto the window, or use Settings, Import, and the turns are read into a meeting with no
+audio. These shapes are understood:
+
+- this app's own `transcript.md` (`**[00:01:02] Name**` headings);
+- `Ben Adams: ...` lines, with or without a leading `[00:01:02]`, which is what Granola and most
+  other tools write (Granola's own "Me" becomes your name, so the summary attributes your points
+  to you);
+- a speaker and a time as a heading, `Ben Adams   0:04` or `Ben Adams (0:04)`, with the words
+  beneath it, as Teams, Otter, and Fireflies write it;
+- `.vtt` and `.srt` subtitle exports, including WebVTT `<v Name>` voice spans.
+
+YAML front matter (`title`, `date`, `attendees`) is honoured where it is there, a `## Transcript`
+section is preferred over the notes around it, and prose with no speakers at all still imports.
+Nothing needs transcribing, so the meeting goes straight to the search index and the summary.
+
+To see how a file from an unfamiliar tool would be read, without importing anything:
+
+```
+cd backend && uv run python -m meetingnotes.tools.transcript_text "/path/to/export.md"
+```
 
 You can also import your history from Granola: use its CSV export (Settings, Profile, Generate
 CSV) from Settings, Import. Those meetings come in with their transcript, summary, notes, and

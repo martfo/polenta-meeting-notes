@@ -27,6 +27,7 @@ from meetingnotes.storage.frontmatter import write_meeting_md
 from meetingnotes.storage.transcript import render_transcript
 from meetingnotes.storage.vault import Vault
 from meetingnotes.tools.transcript_text import (
+    apply_owner_label,
     parse_markdown_transcript,
     transcript_duration_s,
 )
@@ -36,7 +37,9 @@ from meetingnotes.tools.transcript_text import (
 # and runs on to the summary.
 FIRST_STAGE = "embed"
 
-TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".text"}
+# What a dropped transcript can be. Subtitle exports (.vtt, .srt) are
+# transcripts too: a tool that writes captions is transcribing a meeting.
+TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".text", ".vtt", ".srt"}
 
 
 def title_from_filename(name: str) -> str:
@@ -59,6 +62,7 @@ def import_transcript_text(
     title: str | None = None,
     started_at: datetime | None = None,
     filename: str | None = None,
+    owner_name: str | None = None,
 ) -> str:
     """Create a meeting from a written transcript and enqueue it.
 
@@ -70,6 +74,9 @@ def import_transcript_text(
     parsed = parse_markdown_transcript(text)
     if not parsed.segments:
         raise ValueError("no transcript text found in the file")
+    # Other tools write the person recording as "Me"; the summary is told to
+    # ignore placeholder labels, so give them their name.
+    parsed.segments = apply_owner_label(parsed.segments, owner_name)
 
     stem = Path(filename).stem if filename else ""
     started_at = (started_at or parsed.started_at
@@ -140,6 +147,7 @@ def import_transcript_file(
     path: Path | str,
     title: str | None = None,
     started_at: datetime | None = None,
+    owner_name: str | None = None,
 ) -> str:
     """Read a transcript file and import it. Anything unreadable as text, or
     empty of turns, is refused rather than becoming a blank meeting."""
@@ -158,4 +166,5 @@ def import_transcript_file(
     if not text.strip():
         raise ValueError(f"'{path.name}' is empty")
     return import_transcript_text(
-        conn, vault, text, title=title, started_at=started_at, filename=path.name)
+        conn, vault, text, title=title, started_at=started_at, filename=path.name,
+        owner_name=owner_name)
