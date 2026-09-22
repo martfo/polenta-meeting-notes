@@ -2,10 +2,10 @@
 
 A running summary for continuing work in a fresh Claude Code session. Pair this with
 `DESIGN.md` (the pinned source of truth for schemas, formats, and architecture) and the git
-log (88 commits, each a self-contained slice with its own tests). **Current runtime version is
-37**; HEAD is on `main` (`e0e5c4e`), pushed to `github.com/martfo/polenta-meeting-notes`. See
+log (91 commits, each a self-contained slice with its own tests). **Current runtime version is
+38**; HEAD is on `main` (`3c83852`), pushed to `github.com/martfo/polenta-meeting-notes`. See
 the "Session log" section below for everything done since the app first shipped (runtime
-24 → 37). This doc is maintained by the `handoff` skill (`.claude/skills/handoff/`; a generic
+24 → 38). This doc is maintained by the `handoff` skill (`.claude/skills/handoff/`; a generic
 copy in `~/.claude/skills/handoff/` covers the user's other projects).
 
 ## What this is
@@ -32,7 +32,7 @@ message of the session; `DESIGN.md` reconciles it with the code.
 ## Build / test / ship
 
 - `make gate` — the fast gate (backend pytest fast markers + `swift test`). Single meaning of
-  green. Currently **145 backend + 43 app tests pass**.
+  green. Currently **180 backend + 50 app tests pass**.
 - `make pipeline` — real WhisperX/pyannote against fixtures (needs `uv sync --extra pipeline`,
   the HF token in Keychain, and the pyannote licences accepted). Green as of last run (7 tests),
   and diarisation/embedding run on the Apple GPU (MPS) there.
@@ -60,7 +60,7 @@ message of the session; `DESIGN.md` reconciles it with the code.
 
 The shipped app provisions the Python backend into
 `~/Library/Application Support/MeetingNotes/runtime` on first run. `runtimeVersion` in
-`app/Sources/MeetingNotesCore/Provisioner.swift` (currently **"37"**, with a dated changelog
+`app/Sources/MeetingNotesCore/Provisioner.swift` (currently **"38"**, with a dated changelog
 comment per version) is a marker: bump it whenever backend code changes so the installed app
 re-provisions and picks up the new backend. **App-only changes need no bump; any backend change
 does.** A stale runtime silently runs old backend code — the source of many "why isn't my fix
@@ -122,6 +122,25 @@ plus a long tail of enhancements from a week of real use. Notable subsystems:
   brand logo in toolbar; full-window "Ask the library" panel with persistent conversation;
   Settings (owner name, recording shortcut, appearance font/size, summary prompt restore,
   Granola import, logs).
+- **Transcript import** (`tools/transcript_text.py` + `jobs/transcript_import.py`, runtime 38):
+  a written transcript dropped on the window (or Settings, Import) becomes a meeting with no
+  audio. The turns are parsed into the same segments the pipeline produces, and the job is
+  enqueued at the **embed** stage, so only the stages that need no audio run: the search index
+  and the summary. Shapes understood: this app's own `transcript.md`
+  (`**[00:01:02] Name**`), `Name: text` lines with or without a leading `[00:01:02]` (Granola
+  and most others), a speaker-and-time heading line (`Ben Adams   0:04`, `Ben Adams (0:04)`)
+  with the words beneath it (Teams, Otter, Fireflies), `Name (00:00:04): ...` on one line, and
+  `.vtt`/`.srt` cues including WebVTT `<v Name>` spans. YAML front matter (title, date,
+  attendees) is honoured, a `## Transcript` section wins over surrounding notes, and prose with
+  no speakers imports as one unattributed turn. A label that is not name-shaped
+  ("One thing to remember: ...") stays prose. Granola's "Me" becomes `config.owner_name` (the
+  summary prompt ignores placeholder labels, so those points would otherwise be lost). The
+  speakers the text names are recorded in `meeting_speakers` with no voiceprint, so they show
+  in the Speakers tab and can be renamed across transcript and summary; `asg.confirm`/`correct`
+  now tolerate a null `cluster_embedding_ref` and teach the gallery nothing in that case. A
+  file with no turns is refused and leaves nothing behind. Diagnostic:
+  `uv run python -m meetingnotes.tools.transcript_text <file>` dry-runs a parse and prints
+  title/date/speakers/turns/duration without importing.
 - **Granola import** (`tools/granola_import.py`): CSV importer, tolerant column mapping,
   atomic per-row writes with rollback, full reconciliation (every row → imported/skipped/
   empty/failed), folder auto-create. Settings → Import.
@@ -227,6 +246,16 @@ preloaded ndarray so pyannote never decodes a file; `afconvert` converts anythin
   /meetings/{id}/date` updates the `started_at` column + `meeting.md` front matter (the id/folder
   name is deliberately left as-is). Fixes imports filed on the wrong day.
 
+**Transcript import [38]** — see the subsystem bullet above. Landed as two commits: the import
+path and the vault write (`98a4c89`), then the other tools' formats (`3c83852`). The Granola CSV
+importer now shares the parser instead of keeping its own copy. Verified on the gate (180
+backend, 50 app), by a real end-to-end run through the worker against LM Studio, and live on the
+installed build: a dropped-file import via the running backend produced a summary with "Me"
+resolved to Martin, then the test meeting was deleted again. The dry-run inspector found a real
+bug on its first use (SubRip cue numbers being appended to the previous line of speech); a cue
+number is now recognised by the time line under it, so a spoken line that is only a number
+survives.
+
 **LLM / summaries / folders**
 - **Summary prompt hardening [25-ish]** — never attribute points/actions to placeholder or
   channel labels (Me, Unassigned, Speaker N, diarisation labels).
@@ -286,9 +315,17 @@ preloaded ndarray so pyannote never decodes a file; `afconvert` converts anythin
 - **Task #14**: enrolment management screen (Phase 2.3 UI) — backend module
   `enrolment/management.py` is built and tested; the SwiftUI screen + endpoints are not.
 - **Optional follow-ups the user raised**: library-wide find/replace (fix a name across every
-  meeting, not just one); cleaning up the meeting title when an imported filename is purely a
-  timestamp; renaming the on-disk folder when the recorded date changes (currently the id/folder
-  stays put, only the displayed date moves).
+  meeting, not just one); renaming the on-disk folder when the recorded date changes (currently
+  the id/folder stays put, only the displayed date moves).
+  ~~Cleaning up the meeting title when an imported filename is purely a timestamp~~ **done for
+  transcript imports** (runtime 38: a name with no letters in it gives "Transcript 19 August
+  2026" instead of a row of digits); audio import still uses the raw cleaned stem.
+- **Insta360 Wave export format is unconfirmed.** The user asked about it; the Wave Controller
+  app is installed (`~/Library/Application Support/Insta360/Insta360 Wave Controller`) but keeps
+  no exports on disk, and its strings only show transcripts live in the app's "My recordings"
+  web view. The import covers the shapes that class of tool emits (cues, heading lines), but a
+  real Wave export should be run through
+  `uv run python -m meetingnotes.tools.transcript_text <file>` and added as a test case.
 - **Model choice**: the user runs a large Qwen instruct model in LM Studio. App is
   model-agnostic. A non-thinking instruct model gives the cleanest strict-JSON folder replies.
 
@@ -307,8 +344,13 @@ another app is focused. The Console subsystem for capture/tap diagnostics is
   (healthy `system.wav`, natural speech), and imported real meetings summarise at Granola parity.
 - distil transcription, the CPU-thread speedup, folder-suggestion caching, filename-date import,
   adjustable date, pending-summary resume, the installTap crash fix, and the library-list
-  performance fix are all installed and running (runtime 37 verified live in the vault's venv;
-  installed app binary matches the latest build).
+  performance fix are all installed and running.
+- Transcript import is installed and confirmed live on **runtime 38** (`.provisioned` = 38, the
+  vault venv carries `tools/transcript_text.py`, the `/meetings/import-transcript` route answers
+  with its own error text): a real file went in through the running backend, summarised, and was
+  deleted again. The drag-and-drop gesture itself and the Settings picker are still only
+  logic-tested (`ImportKind`/`ImportSelection` in the app gate); the HTTP path underneath them is
+  what was exercised live.
 
 **Still genuinely unverified / worth watching:**
 - The installTap crash fix's worst case is untestable off the exact device state; the Obj-C
@@ -324,11 +366,12 @@ another app is focused. The Console subsystem for capture/tap diagnostics is
   Ocorian. The user imports long recordings (some multi-hour) named by date/time.
 - macOS on an **M3 Ultra (20 P-cores, 60-core GPU, 256 GB)**; AirPods often the input. ffmpeg is
   no longer required (removed in runtime 25) — do not reintroduce a dependency on it.
-- Installed app is **runtime 37** (verified: `.provisioned` marker = 37, venv code current).
+- Installed app is **runtime 38** (verified: `.provisioned` marker = 38, venv code current).
 - HF token stored in Keychain (service `MeetingNotes`, account `huggingface-token`).
 - git identity is set repo-local (Martin / martin@designturbine.co.uk); remote is
   `github.com/martfo/polenta-meeting-notes` over gh HTTPS (the SSH key is not authorised — use
   the gh credential helper / HTTPS remote).
-- Commit trailer convention: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+- Commit trailer convention: `Co-Authored-By: Claude <model> <noreply@anthropic.com>`, naming the
+  model of the session doing the work (Opus 4.8 earlier, Opus 5 from 22 September 2026).
 - The user's workflow this session: implement → `make gate` → `make dmg` → commit → push, then
   (often) install the DMG for them. Push only when asked; they gate pushes explicitly.
