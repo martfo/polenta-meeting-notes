@@ -18,6 +18,7 @@ from meetingnotes.enrolment import assignments as asg
 from meetingnotes.enrolment.gallery import Gallery
 from meetingnotes.jobs import queue as q
 from meetingnotes.jobs.importer import import_wav
+from meetingnotes.jobs.transcript_import import import_transcript_file
 from meetingnotes.jobs.worker import Worker, retry_meeting
 from meetingnotes.llm.chat import ask_meeting
 from meetingnotes.llm.folder_filing import suggested_folder
@@ -47,6 +48,11 @@ class ImportRequest(BaseModel):
     expected_speakers: int | None = None
     mic_path: str | None = None
     system_path: str | None = None
+
+
+class ImportTranscriptRequest(BaseModel):
+    path: str
+    title: str | None = None
 
 
 class ChatTurn(BaseModel):
@@ -129,6 +135,22 @@ def create_app(state: AppState) -> FastAPI:
                 source=request.source, expected_speakers=request.expected_speakers,
                 mic_path=request.mic_path, system_path=request.system_path,
             )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        state.worker.notify()
+        return {"meeting_id": meeting_id}
+
+    @app.post("/meetings/import-transcript")
+    def import_transcript(request: ImportTranscriptRequest) -> dict:
+        """Import an already-written transcript (markdown or text) as a
+        meeting with no audio. It is indexed and summarised like a recording,
+        skipping only the stages that need audio."""
+        source_path = Path(request.path)
+        if not source_path.exists():
+            raise HTTPException(404, f"no file at {request.path}")
+        try:
+            meeting_id = import_transcript_file(
+                conn, vault, source_path, title=request.title)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         state.worker.notify()

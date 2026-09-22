@@ -215,6 +215,17 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         return result.meeting_id
     }
 
+    /// Import a written transcript (markdown or text) as a meeting with no
+    /// audio. The backend parses the turns and runs the stages that do not
+    /// need audio: the search index and the summary.
+    func importTranscriptFile(path: String, title: String?) async throws -> String {
+        struct Imported: Codable { let meeting_id: String }
+        var body = ["path": path]
+        if let title { body["title"] = title }
+        let result: Imported = try await post("/meetings/import-transcript", body: body)
+        return result.meeting_id
+    }
+
     func importGranolaCSV(_ csvText: String) async throws -> GranolaImportResult {
         struct Payload: Encodable { let csv_text: String }
         return try await send("POST", "/import/granola", encodable: Payload(csv_text: csvText))

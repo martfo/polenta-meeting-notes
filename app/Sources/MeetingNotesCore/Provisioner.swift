@@ -102,7 +102,10 @@ public enum RuntimeLocation {
 /// 37: transcription uses more CPU threads (~2x faster on a many-core Mac), and
 ///     folder suggestions never invent a generic catch-all folder (General,
 ///     Uncategorized, ...) and prefer an existing folder.
-public let runtimeVersion = "37"
+/// 38: a written transcript can be imported: drag a markdown or text file onto
+///     the window (or Settings, Import) and its turns are read into a meeting
+///     with no audio, then indexed and summarised like a recording.
+public let runtimeVersion = "38"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

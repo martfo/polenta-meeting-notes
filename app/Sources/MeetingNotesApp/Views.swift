@@ -91,8 +91,8 @@ struct VaultPicker: View {
 struct MainSplit: View {
     @EnvironmentObject var model: AppModel
     @State private var showLibraryChat = false
-    // Audio files dropped on the window, held until the user confirms the import.
-    @State private var droppedAudio: [URL] = []
+    // Files dropped on the window, held until the user confirms the import.
+    @State private var dropped = ImportSelection()
     @State private var confirmingImport = false
     @State private var dropTargeted = false
 
@@ -132,7 +132,7 @@ struct MainSplit: View {
         }
         .animation(.easeInOut(duration: 0.15), value: showLibraryChat)
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
-            collectAudioDrops(providers)
+            collectDrops(providers)
         }
         .overlay {
             if dropTargeted {
@@ -142,12 +142,13 @@ struct MainSplit: View {
                     .allowsHitTesting(false)
             }
         }
-        .confirmationDialog(importPrompt, isPresented: $confirmingImport, titleVisibility: .visible) {
+        .confirmationDialog(dropped.prompt(), isPresented: $confirmingImport,
+                            titleVisibility: .visible) {
             Button("Import") {
-                model.importAudioFiles(droppedAudio)
-                droppedAudio = []
+                model.importFiles(dropped.audio + dropped.transcripts)
+                dropped = ImportSelection()
             }
-            Button("Cancel", role: .cancel) { droppedAudio = [] }
+            Button("Cancel", role: .cancel) { dropped = ImportSelection() }
         }
         .navigationTitle("Polenta Meeting Notes")
         .toolbar {
@@ -166,16 +167,10 @@ struct MainSplit: View {
         }
     }
 
-    private var importPrompt: String {
-        if droppedAudio.count == 1 {
-            return "Import \(droppedAudio[0].lastPathComponent) as a meeting?"
-        }
-        return "Import \(droppedAudio.count) recordings as meetings?"
-    }
-
-    /// Gather the audio files from a drop, then ask to confirm. Returns whether
-    /// the drop held anything importable, so a non-audio drop is declined.
-    private func collectAudioDrops(_ providers: [NSItemProvider]) -> Bool {
+    /// Gather the importable files from a drop, then ask to confirm. Returns
+    /// whether the drop held anything importable, so a drop of something else
+    /// (a PDF, a folder) is declined rather than silently swallowed.
+    private func collectDrops(_ providers: [NSItemProvider]) -> Bool {
         let fileProviders = providers.filter {
             $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
         }
@@ -186,25 +181,20 @@ struct MainSplit: View {
         for provider in fileProviders {
             group.enter()
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                if let url, Self.isAudio(url) {
+                if let url, ImportKind.of(url: url) != nil {
                     lock.lock(); collected.add(url); lock.unlock()
                 }
                 group.leave()
             }
         }
         group.notify(queue: .main) {
-            let urls = collected.compactMap { $0 as? URL }
-            if !urls.isEmpty {
-                droppedAudio = urls
+            let selection = ImportSelection.from(urls: collected.compactMap { $0 as? URL })
+            if !selection.isEmpty {
+                dropped = selection
                 confirmingImport = true
             }
         }
         return true
-    }
-
-    private static func isAudio(_ url: URL) -> Bool {
-        guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
-        return type.conforms(to: .audio)
     }
 }
 
@@ -296,6 +286,19 @@ struct SettingsSheet: View {
                         Text("Bring in an existing recording (mp3, m4a, wav). It is "
                              + "transcribed, its speakers separated, and summarised like a "
                              + "live meeting.")
+                    }
+                    LabeledContent {
+                        Button(importing ? "Importing…" : "Choose transcript…") {
+                            chooseTranscriptFile()
+                        }
+                        .disabled(importing)
+                    } label: {
+                        Label("Import a transcript", systemImage: "doc.text")
+                        Text("Bring in a transcript that is already written up "
+                             + "(markdown or text, from this app or another tool). "
+                             + "It is read into speaker turns and summarised; there is "
+                             + "no audio to transcribe. You can also drag one onto the "
+                             + "window.")
                     }
                     LabeledContent {
                         Button(importing ? "Importing…" : "Choose CSV…") { chooseGranolaCSV() }
@@ -396,6 +399,31 @@ struct SettingsSheet: View {
                 await model.refreshLibrary()
                 importStatus = "Imported \(url.lastPathComponent). It is in the library now "
                     + "and will fill in as it transcribes and summarises."
+            } catch {
+                importStatus = "Could not import \(url.lastPathComponent): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func chooseTranscriptFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.plainText, .text]
+        panel.allowsOtherFileTypes = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.prompt = "Import"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        importing = true
+        importStatus = "Importing \(url.lastPathComponent)…"
+        Task {
+            defer { importing = false }
+            do {
+                // The transcript's own front matter or heading names the
+                // meeting where it has one, so no title is forced here.
+                _ = try await model.client.importTranscriptFile(path: url.path, title: nil)
+                await model.refreshLibrary()
+                importStatus = "Imported \(url.lastPathComponent). It is in the library now "
+                    + "and will fill in as it summarises."
             } catch {
                 importStatus = "Could not import \(url.lastPathComponent): \(error.localizedDescription)"
             }

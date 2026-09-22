@@ -12,6 +12,26 @@ from meetingnotes.enrolment.gallery import Gallery
 from meetingnotes.enrolment.matching import MatchResult, cluster_voiceprint, match_cluster
 
 
+def record_named_speaker(
+    gallery: Gallery, meeting_id: str, diarised_label: str, name: str,
+) -> int:
+    """Record a speaker the text named, with no voiceprint behind it.
+
+    An imported transcript states who spoke; nothing was heard, so the name is
+    taken as given (confirmed, assigned manually) and no voice evidence is
+    added to the gallery. Renaming the speaker later works exactly as it does
+    for a recording."""
+    speaker_id = gallery.ensure_speaker(name)
+    cur = gallery.conn.execute(
+        """INSERT INTO meeting_speakers(meeting_id, diarised_label, display_name,
+               speaker_id, assigned_by, confirmed)
+           VALUES (?, ?, ?, ?, 'manual', 1)""",
+        (meeting_id, diarised_label, name, speaker_id),
+    )
+    gallery.conn.commit()
+    return cur.lastrowid
+
+
 def record_cluster(
     gallery: Gallery, meeting_id: str, diarised_label: str,
     segment_embeddings: np.ndarray | list,
@@ -48,8 +68,13 @@ def get_assignment(conn: sqlite3.Connection, assignment_id: int) -> sqlite3.Row:
     return row
 
 
-def cluster_vector(gallery: Gallery, assignment_id: int) -> np.ndarray:
-    return gallery.load_vector(get_assignment(gallery.conn, assignment_id)["cluster_embedding_ref"])
+def cluster_vector(gallery: Gallery, assignment_id: int) -> np.ndarray | None:
+    """The cluster's voiceprint, or None where there is no voice behind the
+    name. A transcript imported as text names its speakers without any audio,
+    so those rows carry no voiceprint: they can be renamed like any other, but
+    there is nothing to teach the gallery."""
+    ref = get_assignment(gallery.conn, assignment_id)["cluster_embedding_ref"]
+    return gallery.load_vector(ref) if ref else None
 
 
 def run_enrolment(
@@ -58,7 +83,10 @@ def run_enrolment(
 ) -> MatchResult | None:
     """Highest-priority naming: match the cluster against the gallery and
     auto-assign on success, recording the provenance."""
-    match = match_cluster(cluster_vector(gallery, assignment_id), gallery, threshold, veto_margin)
+    vector = cluster_vector(gallery, assignment_id)
+    if vector is None:
+        return None
+    match = match_cluster(vector, gallery, threshold, veto_margin)
     if match is None:
         return None
     gallery.conn.execute(
@@ -93,10 +121,12 @@ def confirm(gallery: Gallery, assignment_id: int, add_positive: bool = True) -> 
     speaker_id = row["speaker_id"]
     if speaker_id is None:
         raise ValueError("cannot confirm an unassigned cluster")
-    if add_positive:
+    vector = cluster_vector(gallery, assignment_id)
+    # Nothing was heard for a name that came from imported text, so there is
+    # no positive example to add; the confirmation still stands.
+    if add_positive and vector is not None:
         gallery.add_voiceprint(
-            speaker_id, "positive", cluster_vector(gallery, assignment_id),
-            source_meeting_id=row["meeting_id"],
+            speaker_id, "positive", vector, source_meeting_id=row["meeting_id"],
         )
     gallery.conn.execute(
         "UPDATE meeting_speakers SET confirmed = 1 WHERE id = ?", (assignment_id,)
@@ -120,7 +150,8 @@ def correct(gallery: Gallery, assignment_id: int, new_name: str | None) -> None:
     row = get_assignment(gallery.conn, assignment_id)
     vp = cluster_vector(gallery, assignment_id)
 
-    wrongly_matched = row["assigned_by"] == "enrolment" and row["speaker_id"] is not None
+    wrongly_matched = (row["assigned_by"] == "enrolment" and row["speaker_id"] is not None
+                       and vp is not None)
     if wrongly_matched and (new_name is None or new_name != gallery.speaker_name(row["speaker_id"])):
         gallery.add_voiceprint(
             row["speaker_id"], "negative", vp, source_meeting_id=row["meeting_id"]
@@ -138,7 +169,8 @@ def correct(gallery: Gallery, assignment_id: int, new_name: str | None) -> None:
         )
     else:
         speaker_id = gallery.ensure_speaker(new_name)
-        gallery.add_voiceprint(speaker_id, "positive", vp, source_meeting_id=row["meeting_id"])
+        if vp is not None:
+            gallery.add_voiceprint(speaker_id, "positive", vp, source_meeting_id=row["meeting_id"])
         gallery.conn.execute(
             """UPDATE meeting_speakers
                SET speaker_id = ?, display_name = ?, assigned_by = 'manual',

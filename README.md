@@ -53,7 +53,7 @@ keeps recording while the call is still going and stops once the audio has been 
 minutes, so a meeting that runs over is captured in full. A long-running safety limit still
 stops a forgotten recording.
 
-## Importing existing recordings
+## Importing existing recordings and transcripts
 
 You can bring in audio you already have. Use Settings, Import, or simply drag one or more files
 onto the window and confirm. Most formats are accepted (mp3, m4a, wav) and are converted to the
@@ -64,6 +64,13 @@ Recordings are often named for when they were made, for example `2026-08-19 14-3
 `Recording 20260819_143000.mp3`. When the filename contains a date and time the meeting is filed
 under that day rather than the moment you imported it. If a date cannot be read, or you want to
 correct one, adjust the recorded date from the meeting's detail view and the library re-files it.
+
+Transcripts that are already written up come in the same way. Drag a markdown or text file onto
+the window, or use Settings, Import, and the turns are read into a meeting with no audio: this
+app's own `transcript.md`, a Teams or Zoom export, or anything written as `Ben Adams: ...` lines,
+with or without timestamps. YAML front matter (`title`, `date`, `attendees`) is honoured where it
+is there, and a `## Transcript` section is preferred over the notes around it. Nothing needs
+transcribing, so the meeting goes straight to the search index and the summary.
 
 You can also import your history from Granola: use its CSV export (Settings, Profile, Generate
 CSV) from Settings, Import. Those meetings come in with their transcript, summary, notes, and

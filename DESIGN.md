@@ -57,13 +57,15 @@ meeting-notes/
       pipeline/                whisperx transcription and diarisation
       enrolment/               matching, gallery, provenance, management
       storage/                 sqlite, vault, markdown read and write, keychain
-      jobs/                    processing queue, worker, stages, import
+      jobs/                    processing queue, worker, stages, audio and
+                               transcript import
       llm/                     LM Studio client, summary, chat, folders, library chat
       language/                em dash strip, British pass, dictionary flag, lint
       logging/                 log setup and helpers
       notes/                   notes.md, pasted images, OCR
       vectors/                 chunking, LanceDB store, bge-m3 indexer
       calendar/                read-only client and meeting detection
+      tools/                   Granola CSV import, written-transcript parsing
       resources/               american_to_british.json, technical_allowlist.txt,
                                summary_prompt.md default, dict/en_GB
       config.py
@@ -135,6 +137,19 @@ files under the right day; captures are unaffected as they pass their own time. 
 recorded date can also be adjusted after the fact from the detail header (PUT
 /meetings/{id}/date): the started_at column and the meeting.md front matter update and the
 library re-files it, while the meeting id is left as it is.
+
+A transcript that is already written up can be imported the same two ways (Settings, Import,
+or dropped on the window): a markdown or text file becomes a meeting with no audio.
+tools.transcript_text parses the turns, understanding this app's own transcript.md
+("**[00:01:02] Name**" headings), plain "Name: text" lines with or without leading
+timestamps, YAML front matter (title, date, attendees), and a "## Transcript" section in a
+longer document; prose with no speakers becomes one unattributed turn. A line whose label is
+not name-shaped ("One thing to remember: ...") stays prose. jobs.transcript_import then
+writes segments.json, transcript.md, and meeting.md, and enqueues the job at the embed stage,
+so it runs only the stages that need no audio: the search index and the summary. Timestamps
+that are synthetic (a transcript with none of its own) give no duration rather than a false
+one. A file with no turns in it is refused and leaves nothing behind, and there is no stable
+document id as Granola has, so importing the same file twice makes two meetings.
 
 Before transcription each meeting builds a Whisper initial prompt from its participant names
 (the owner plus calendar attendees) and the configured glossary (config.glossary), so the

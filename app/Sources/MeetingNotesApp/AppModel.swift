@@ -117,20 +117,28 @@ final class AppModel: ObservableObject {
 
     // MARK: - Import
 
-    /// Import one or more existing audio files as meetings, converting and
-    /// enqueueing each through the same backend path the Settings picker uses.
-    /// Progress is reported in the status banner.
-    func importAudioFiles(_ urls: [URL]) {
-        guard !urls.isEmpty else { return }
+    /// Import one or more existing files as meetings: audio through the
+    /// recording pipeline, written transcripts straight to the index and
+    /// summary. Progress is reported in the status banner.
+    func importFiles(_ urls: [URL]) {
+        let selection = ImportSelection.from(urls: urls)
+        guard !selection.isEmpty else { return }
         Task {
             var imported = 0
             var lastError: String?
-            for url in urls {
-                let title = url.deletingPathExtension().lastPathComponent
-                    .replacingOccurrences(of: "_", with: " ")
-                    .replacingOccurrences(of: "-", with: " ")
+            for url in selection.audio {
                 do {
-                    _ = try await client.importAudioFile(path: url.path, title: title)
+                    _ = try await client.importAudioFile(path: url.path, title: Self.title(for: url))
+                    imported += 1
+                } catch {
+                    lastError = "Could not import \(url.lastPathComponent): \(error.localizedDescription)"
+                }
+            }
+            for url in selection.transcripts {
+                do {
+                    // No title: the backend reads the transcript's own front
+                    // matter or heading first, and falls back to the filename.
+                    _ = try await client.importTranscriptFile(path: url.path, title: nil)
                     imported += 1
                 } catch {
                     lastError = "Could not import \(url.lastPathComponent): \(error.localizedDescription)"
@@ -138,13 +146,27 @@ final class AppModel: ObservableObject {
             }
             if imported > 0 {
                 await refreshLibrary()
-                lastRecordingMessage = imported == 1
-                    ? "Imported \(urls.first!.lastPathComponent). It will transcribe and summarise now."
-                    : "Imported \(imported) recordings. They will transcribe and summarise now."
+                lastRecordingMessage = Self.importMessage(selection, imported: imported)
             } else if let lastError {
                 lastRecordingMessage = lastError
             }
         }
+    }
+
+    static func title(for url: URL) -> String {
+        url.deletingPathExtension().lastPathComponent
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+    }
+
+    private static func importMessage(_ selection: ImportSelection, imported: Int) -> String {
+        if imported == 1, selection.count == 1 {
+            let name = (selection.audio.first ?? selection.transcripts.first)!.lastPathComponent
+            return selection.audio.isEmpty
+                ? "Imported \(name). It will summarise now."
+                : "Imported \(name). It will transcribe and summarise now."
+        }
+        return "Imported \(imported) meetings. They will process now."
     }
 
     // MARK: - Recording

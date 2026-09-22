@@ -33,6 +33,7 @@ from meetingnotes.storage.db import utcnow
 from meetingnotes.storage.frontmatter import write_meeting_md
 from meetingnotes.storage.transcript import render_transcript
 from meetingnotes.storage.vault import Vault
+from meetingnotes.tools.transcript_text import parse_transcript
 
 # Candidate header names for each field, compared after normalising to
 # lowercase alphanumerics. The first CSV column that matches wins. Fields are
@@ -78,47 +79,6 @@ def map_columns(headers: Iterable[str]) -> tuple[dict[str, str], list[str]]:
                 break
     unmapped = [h for h in headers if h not in used]
     return mapping, unmapped
-
-
-# A leading timestamp and a "Speaker: text" opening, both optional.
-_TURN = re.compile(
-    r"^\s*(?:\[?(?P<ts>\d{1,2}:\d{2}(?::\d{2})?)\]?\s*)?"
-    r"(?:(?P<speaker>[A-Z][\w .'\-]{0,39}?):\s+)?(?P<text>\S.*)$"
-)
-
-
-def _ts_to_seconds(ts: str) -> float:
-    parts = [int(p) for p in ts.split(":")]
-    if len(parts) == 2:
-        return parts[0] * 60 + parts[1]
-    return parts[0] * 3600 + parts[1] * 60 + parts[2]
-
-
-def parse_transcript(text: str) -> list[Segment]:
-    """Parse a Granola transcript into segments. Recognises optional leading
-    timestamps and 'Speaker: text' turns; falls back to plain paragraphs.
-    Where no timestamps are given, turns get monotonic synthetic ones so the
-    rendered transcript reads tidily."""
-    if not text or not text.strip():
-        return []
-    segments: list[Segment] = []
-    for raw_line in text.replace("\r\n", "\n").split("\n"):
-        line = raw_line.strip()
-        if not line:
-            continue
-        match = _TURN.match(line)
-        if not match:
-            continue
-        speaker = (match.group("speaker") or "").strip() or None
-        body = match.group("text").strip()
-        ts = match.group("ts")
-        start = _ts_to_seconds(ts) if ts else float(len(segments))
-        if segments and speaker == segments[-1].speaker and ts is None:
-            segments[-1] = segments[-1].model_copy(
-                update={"text": segments[-1].text + " " + body, "end": start + 1})
-        else:
-            segments.append(Segment(start=start, end=start + 1, speaker=speaker, text=body))
-    return segments
 
 
 def _parse_date(value: str | None) -> datetime:
