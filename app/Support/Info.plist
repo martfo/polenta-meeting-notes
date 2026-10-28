@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Polenta Meeting Notes</string>
+	<key>CFBundleDisplayName</key>
+	<string>Polenta Meeting Notes</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.example.polenta</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleExecutable</key>
+	<string>MeetingNotesApp</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.4</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Polenta Meeting Notes records the sound of your online calls so the other participants can be transcribed. Nothing leaves this Mac.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Polenta Meeting Notes records your microphone so you and anyone in the room can be transcribed. Nothing leaves this Mac.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Polenta Meeting Notes reads your calendar, on this Mac only, to offer to record when a meeting is due and to suggest attendee names for the voices it hears. It never changes anything in your calendar.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+</dict>
+</plist>

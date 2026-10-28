@@ -1,0 +1,919 @@
+// The window: library on the left, meeting detail on the right, the
+// recording bar along the bottom, and plain status lines when the backend or
+// LM Studio needs attention. No silent failures.
+
+import MeetingNotesCore
+import SwiftUI
+import UniformTypeIdentifiers
+
+@main
+struct MeetingNotesApp: App {
+    @StateObject private var model = AppModel()
+
+    var body: some Scene {
+        WindowGroup {
+            RootView()
+                .environmentObject(model)
+                .frame(minWidth: 980, minHeight: 640)
+                .onAppear {
+                    if model.vaultURL != nil { model.bootBackend() }
+                    // The global hotkey toggles recording even when another
+                    // app has focus.
+                    GlobalHotKey.shared.action = { [weak model] in model?.toggleRecording() }
+                    GlobalHotKey.shared.applyFromDefaults()
+                }
+        }
+    }
+}
+
+struct RootView: View {
+    @EnvironmentObject var model: AppModel
+    @State private var needsFirstRun = RootView.firstRunNeeded()
+    @AppStorage(Appearance.sizeKey) private var baseFontSize = Appearance.defaultSize
+    @AppStorage(Appearance.designKey) private var fontDesign = "system"
+
+    /// First run is decided by the provisioning marker and its version, not
+    /// by whether some runtime happens to exist: an outdated runtime must be
+    /// provisioned over, not reused.
+    static func firstRunNeeded() -> Bool {
+        if ProcessInfo.processInfo.environment["MEETINGNOTES_BACKEND_PYTHON"] != nil {
+            return false  // a development checkout supplies its own backend
+        }
+        return Provisioner.isFirstRun(runtime: RuntimeLocation.runtimeDirectory())
+    }
+
+    var body: some View {
+        Group {
+            if model.vaultURL == nil {
+                VaultPicker()
+            } else if needsFirstRun {
+                FirstRunView {
+                    needsFirstRun = false
+                    model.bootBackend()
+                }
+            } else {
+                MainSplit()
+            }
+        }
+        .font(Appearance.font(size: baseFontSize, design: fontDesign))
+    }
+}
+
+struct VaultPicker: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Choose where your meeting vault lives")
+                .font(.title2)
+            Text("Everything the app stores, meetings, transcripts, summaries, "
+                 + "and notes, goes into this one folder. Pick an existing vault "
+                 + "to open it as it is.")
+                .frame(maxWidth: 460)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+            Button("Choose a folder") {
+                let panel = NSOpenPanel()
+                panel.canChooseDirectories = true
+                panel.canChooseFiles = false
+                panel.canCreateDirectories = true
+                panel.prompt = "Use this folder"
+                if panel.runModal() == .OK, let url = panel.url {
+                    model.openVault(at: url)
+                }
+            }
+            .keyboardShortcut(.defaultAction)
+        }
+        .padding(40)
+    }
+}
+
+struct MainSplit: View {
+    @EnvironmentObject var model: AppModel
+    @State private var showLibraryChat = false
+    // Files dropped on the window, held until the user confirms the import.
+    @State private var dropped = ImportSelection()
+    @State private var confirmingImport = false
+    @State private var dropTargeted = false
+
+    var body: some View {
+        ZStack {
+            VStack(spacing: 0) {
+                StatusBanner()
+                NavigationSplitView {
+                    LibraryList()
+                } detail: {
+                    if let meetingID = model.selectedMeetingID {
+                        MeetingDetailScreen(meetingID: meetingID)
+                            .id(meetingID)
+                    } else {
+                        Text("Choose a meeting, or press Start to record one.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Divider()
+                RecordingBar(capture: model.capture, calendar: model.calendar,
+                             microphones: model.microphones)
+            }
+
+            // The library chat fills the whole app area, so leaving it to read
+            // a cited meeting and returning keeps the conversation.
+            if showLibraryChat {
+                LibraryChatPanel(
+                    chat: model.libraryChat,
+                    onOpenMeeting: { meetingID in
+                        model.selectedMeetingID = meetingID
+                        showLibraryChat = false
+                    },
+                    onClose: { showLibraryChat = false })
+                    .environmentObject(model)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: showLibraryChat)
+        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+            collectDrops(providers)
+        }
+        .overlay {
+            if dropTargeted {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [8]))
+                    .padding(6)
+                    .allowsHitTesting(false)
+            }
+        }
+        .confirmationDialog(dropped.prompt(), isPresented: $confirmingImport,
+                            titleVisibility: .visible) {
+            Button("Import") {
+                model.importFiles(dropped.audio + dropped.transcripts)
+                dropped = ImportSelection()
+            }
+            Button("Cancel", role: .cancel) { dropped = ImportSelection() }
+        }
+        .navigationTitle("Polenta Meeting Notes")
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 22, height: 22)
+                    .padding(.trailing, 2)
+            }
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button("Ask the library") { showLibraryChat.toggle() }
+                RecordToolbarButton(capture: model.capture)
+            }
+        }
+    }
+
+    /// Gather the importable files from a drop, then ask to confirm. Returns
+    /// whether the drop held anything importable, so a drop of something else
+    /// (a PDF, a folder) is declined rather than silently swallowed.
+    private func collectDrops(_ providers: [NSItemProvider]) -> Bool {
+        let fileProviders = providers.filter {
+            $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+        }
+        guard !fileProviders.isEmpty else { return false }
+        let collected = NSMutableArray()
+        let lock = NSLock()
+        let group = DispatchGroup()
+        for provider in fileProviders {
+            group.enter()
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                if let url, ImportKind.of(url: url) != nil {
+                    lock.lock(); collected.add(url); lock.unlock()
+                }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) {
+            let selection = ImportSelection.from(urls: collected.compactMap { $0 as? URL })
+            if !selection.isEmpty {
+                dropped = selection
+                confirmingImport = true
+            }
+        }
+        return true
+    }
+}
+
+struct RecordToolbarButton: View {
+    @EnvironmentObject var model: AppModel
+    @ObservedObject var capture: CaptureController
+    // The keys are read so the tooltip updates when the shortcut changes.
+    @AppStorage(RecordShortcut.key) private var shortcutKey = RecordShortcut.defaultKey
+    @AppStorage(RecordShortcut.modifiersKey) private var modifierRaw = RecordShortcut.defaultModifiers.rawValue
+
+    var body: some View {
+        if capture.isCapturing {
+            Button {
+                model.stopRecording()
+            } label: {
+                Label("Stop recording", systemImage: "stop.fill")
+                    .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(PillButtonStyle(background: .red, foreground: .white))
+            .help("Stop recording (\(RecordShortcut.displayString()))")
+        } else {
+            Button {
+                model.startRecording(microphone: model.microphones.selection)
+            } label: {
+                Label("Start recording", systemImage: "record.circle")
+                    .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(PillButtonStyle(background: Color(white: 0.96), foreground: .black))
+            .help("Start recording (\(RecordShortcut.displayString()))")
+        }
+    }
+}
+
+/// A text input with a fill slightly lighter than its surround and a soft
+/// border, so the box stays visible against the dark background rather than
+/// melting into it.
+struct SoftFieldBackground: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .textFieldStyle(.plain)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 8)
+            .background(Color.primary.opacity(0.07))
+            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.12)))
+    }
+}
+
+extension View {
+    func softField() -> some View { modifier(SoftFieldBackground()) }
+}
+
+/// A rounded, filled pill: a light background with dark text stands out in the
+/// toolbar, as the record control should.
+struct PillButtonStyle: ButtonStyle {
+    var background: Color
+    var foreground: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(background.opacity(configuration.isPressed ? 0.8 : 1.0))
+            .clipShape(Capsule())
+            .contentShape(Capsule())
+    }
+}
+
+struct SettingsSheet: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(Appearance.sizeKey) private var baseFontSize = Appearance.defaultSize
+    @AppStorage(Appearance.designKey) private var fontDesign = "system"
+    @State private var importStatus: String?
+    @State private var importing = false
+    @State private var promptRestored = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section("Import") {
+                    LabeledContent {
+                        Button(importing ? "Importing…" : "Choose audio…") { chooseAudioFile() }
+                            .disabled(importing)
+                    } label: {
+                        Label("Import an audio file", systemImage: "waveform")
+                        Text("Bring in an existing recording (mp3, m4a, wav). It is "
+                             + "transcribed, its speakers separated, and summarised like a "
+                             + "live meeting.")
+                    }
+                    LabeledContent {
+                        Button(importing ? "Importing…" : "Choose transcript…") {
+                            chooseTranscriptFile()
+                        }
+                        .disabled(importing)
+                    } label: {
+                        Label("Import a transcript", systemImage: "doc.text")
+                        Text("Bring in a transcript that is already written up: "
+                             + "markdown, text, or a subtitle export (vtt, srt), "
+                             + "from this app, Granola, Teams, Otter, or another "
+                             + "tool. It is read into speaker turns and summarised; "
+                             + "there is no audio to transcribe. You can also drag "
+                             + "one onto the window.")
+                    }
+                    LabeledContent {
+                        Button(importing ? "Importing…" : "Choose CSV…") { chooseGranolaCSV() }
+                            .disabled(importing)
+                    } label: {
+                        Label("Import from Granola", systemImage: "square.and.arrow.down")
+                        Text("Import the CSV export from Granola (Settings, Profile, "
+                             + "Generate CSV). Meetings come in with their transcript, "
+                             + "summary, and folder, ready to search and chat.")
+                    }
+                    if let importStatus {
+                        Text(importStatus).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
+                RecordingShortcutSection()
+
+                MeetingPromptSection()
+
+                Section("Appearance") {
+                    Picker("Font", selection: $fontDesign) {
+                        ForEach(Appearance.designs, id: \.raw) { design in
+                            Text(design.name).tag(design.raw)
+                        }
+                    }
+                    HStack {
+                        Text("Size")
+                        Slider(value: $baseFontSize, in: 11...18, step: 1)
+                        Text("\(Int(baseFontSize)) pt")
+                            .monospacedDigit()
+                            .frame(width: 44, alignment: .trailing)
+                    }
+                    Text("The quick brown fox jumps over the lazy dog.")
+                        .font(Appearance.font(size: baseFontSize, design: fontDesign))
+                        .foregroundStyle(.secondary)
+                }
+
+                OwnerNameSection()
+
+                Section("Summaries") {
+                    LabeledContent {
+                        Button("Open") { model.editSummaryPrompt() }
+                    } label: {
+                        Label("Summary prompt", systemImage: "square.and.pencil")
+                        Text("Changes take effect on the next summary, no restart.")
+                    }
+                    LabeledContent {
+                        Button(promptRestored ? "Restored" : "Restore") { restorePrompt() }
+                            .disabled(promptRestored)
+                    } label: {
+                        Label("Granola-style default", systemImage: "sparkles")
+                        Text("Replace this vault's summary prompt with the latest "
+                             + "bullet-point default, then use Regenerate on a meeting.")
+                    }
+                }
+
+                Section("Troubleshooting") {
+                    LabeledContent {
+                        Button("Show") { model.revealLogs() }
+                    } label: {
+                        Label("Logs", systemImage: "doc.text.magnifyingglass")
+                        Text("What happened and where, never meeting content.")
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            Divider()
+            HStack {
+                Spacer()
+                Button("Close") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            .padding(12)
+        }
+        .frame(width: 480, height: 520)
+    }
+
+    private func restorePrompt() {
+        Task {
+            try? await model.client.restoreDefaultSummaryPrompt()
+            promptRestored = true
+        }
+    }
+
+    private func chooseAudioFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.audio, .mp3, .mpeg4Audio, .wav, .aiff]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.prompt = "Import"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let title = url.deletingPathExtension().lastPathComponent
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+        importing = true
+        importStatus = "Importing \(url.lastPathComponent)…"
+        Task {
+            defer { importing = false }
+            do {
+                _ = try await model.client.importAudioFile(path: url.path, title: title)
+                await model.refreshLibrary()
+                importStatus = "Imported \(url.lastPathComponent). It is in the library now "
+                    + "and will fill in as it transcribes and summarises."
+            } catch {
+                importStatus = "Could not import \(url.lastPathComponent): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func chooseTranscriptFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.plainText, .text]
+        panel.allowsOtherFileTypes = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.prompt = "Import"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        importing = true
+        importStatus = "Importing \(url.lastPathComponent)…"
+        Task {
+            defer { importing = false }
+            do {
+                // The transcript's own front matter or heading names the
+                // meeting where it has one, so no title is forced here.
+                _ = try await model.client.importTranscriptFile(path: url.path, title: nil)
+                await model.refreshLibrary()
+                importStatus = "Imported \(url.lastPathComponent). It is in the library now "
+                    + "and will fill in as it summarises."
+            } catch {
+                importStatus = "Could not import \(url.lastPathComponent): \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func chooseGranolaCSV() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.prompt = "Import"
+        guard panel.runModal() == .OK, let url = panel.url,
+              let csv = try? String(contentsOf: url, encoding: .utf8) else { return }
+        importing = true
+        importStatus = "Importing…"
+        Task {
+            defer { importing = false }
+            do {
+                let result = try await model.client.importGranolaCSV(csv)
+                await model.refreshLibrary()
+                if result.imported == 0 && result.total_rows == 0 && !result.warnings.isEmpty {
+                    importStatus = result.warnings.joined(separator: " ")
+                } else {
+                    // A full tally, so every line of the CSV is accounted for.
+                    var parts = ["\(result.total_rows) rows: \(result.imported) imported"]
+                    if result.skipped > 0 { parts.append("\(result.skipped) already present") }
+                    if result.empty > 0 { parts.append("\(result.empty) empty") }
+                    if result.failed > 0 { parts.append("\(result.failed) failed") }
+                    var status = parts.joined(separator: ", ") + "."
+                    if !result.folders_created.isEmpty {
+                        status += " New folders: \(result.folders_created.joined(separator: ", "))."
+                    }
+                    if !result.reconciled {
+                        status += " Warning: the totals did not reconcile; see logs."
+                    }
+                    if let firstFailure = result.failures.first {
+                        status += " First failure: row \(firstFailure.row) (\(firstFailure.title)): \(firstFailure.reason)"
+                    }
+                    importStatus = status
+                }
+            } catch {
+                importStatus = "Import failed: \(error.localizedDescription)"
+            }
+        }
+    }
+}
+
+struct MeetingPromptSection: View {
+    @EnvironmentObject var model: AppModel
+    @AppStorage(MeetingPromptPreference.enabledKey) private var enabled = true
+
+    var body: some View {
+        Section("Meeting detection") {
+            Toggle("Ask to record when a meeting starts", isOn: $enabled)
+                .onChange(of: enabled) { _, _ in model.meetingPrompt.refresh() }
+            Text("A small pop-up appears in the top-right corner, over any app, when a "
+                 + "calendar meeting is due or a call app (Teams, Zoom, Slack, Webex, "
+                 + "FaceTime, or a browser for Meet) starts using the microphone. It "
+                 + "never records without your click. Recording can always be started "
+                 + "by hand or with the shortcut.")
+                .font(.caption).foregroundStyle(.secondary)
+            Button("Show a sample") { model.meetingPrompt.showSample() }
+        }
+    }
+}
+
+struct OwnerNameSection: View {
+    @EnvironmentObject var model: AppModel
+    @State private var name = ""
+    @State private var loaded = false
+
+    var body: some View {
+        Section("Your name") {
+            Text("Recordings capture your microphone and the call audio as two "
+                 + "separate channels. Your microphone is labelled with this name, "
+                 + "so you never need naming, and only the remote voices are "
+                 + "separated.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                TextField("Your name", text: $name)
+                    .softField()
+                Button("Save") {
+                    Task { try? await model.client.setOwnerName(name) }
+                }
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .task {
+            guard !loaded else { return }
+            loaded = true
+            name = (try? await model.client.ownerName()) ?? "Me"
+        }
+    }
+}
+
+struct RecordingShortcutSection: View {
+    @AppStorage(RecordShortcut.key) private var recordShortcutKey = RecordShortcut.defaultKey
+    @AppStorage(RecordShortcut.modifiersKey) private var modifierRaw = RecordShortcut.defaultModifiers.rawValue
+    @State private var registered = true
+
+    private let keyChoices: [String] =
+        (UnicodeScalar("a").value...UnicodeScalar("z").value).compactMap { UnicodeScalar($0).map(String.init) }
+        + (0...9).map(String.init)
+
+    var body: some View {
+        Section("Recording shortcut") {
+            Text("A system-wide shortcut that starts and stops recording even when "
+                 + "another app, such as your call, has focus. Changes are saved and "
+                 + "take effect immediately.")
+                .font(.caption).foregroundStyle(.secondary)
+            modifiers
+            Picker("Key", selection: $recordShortcutKey) {
+                ForEach(keyChoices, id: \.self) { Text($0.uppercased()).tag($0) }
+            }
+            .frame(maxWidth: 160)
+            LabeledContent("Shortcut") {
+                Text(RecordShortcut.displayString())
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(registered ? Color.primary : Color.orange)
+            }
+            if !registered {
+                Label("This combination could not be registered. It needs at least one "
+                      + "modifier, or another app may already use it.",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+        }
+        .onChange(of: recordShortcutKey) { _, _ in apply() }
+        .onChange(of: modifierRaw) { _, _ in apply() }
+        .onAppear { registered = GlobalHotKey.shared.applyFromDefaults() }
+    }
+
+    private var modifiers: some View {
+        HStack(spacing: 14) {
+            Text("Modifiers").foregroundStyle(.secondary)
+            Toggle("\u{2303}", isOn: modifier(.control)).help("Control")
+            Toggle("\u{2325}", isOn: modifier(.option)).help("Option")
+            Toggle("\u{21E7}", isOn: modifier(.shift)).help("Shift")
+            Toggle("\u{2318}", isOn: modifier(.command)).help("Command")
+        }
+        .toggleStyle(.checkbox)
+    }
+
+    private func modifier(_ mod: ShortcutModifiers) -> Binding<Bool> {
+        Binding(
+            get: { ShortcutModifiers(rawValue: modifierRaw).contains(mod) },
+            set: { on in
+                var set = ShortcutModifiers(rawValue: modifierRaw)
+                if on { set.insert(mod) } else { set.remove(mod) }
+                modifierRaw = set.rawValue
+            })
+    }
+
+    private func apply() {
+        registered = GlobalHotKey.shared.applyFromDefaults()
+    }
+}
+
+struct StatusBanner: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        if let supervisor = model.supervisor {
+            SupervisorBanner(supervisor: supervisor)
+        }
+    }
+}
+
+struct SupervisorBanner: View {
+    @ObservedObject var supervisor: BackendSupervisor
+
+    var message: String? {
+        switch supervisor.state {
+        case .starting:
+            return "Starting the backend."
+        case .running(let lmstudio) where lmstudio == "unreachable":
+            return "LM Studio is not reachable on port 1234. Transcripts still "
+                 + "process; summaries wait until it is back."
+        case .running(let lmstudio) where lmstudio == "no_model_loaded":
+            return "LM Studio is running with no model loaded. Load one to get summaries."
+        case .running:
+            return nil
+        case .down(let reason):
+            return reason
+        }
+    }
+
+    var body: some View {
+        if let message {
+            Text(message)
+                .padding(8)
+                .frame(maxWidth: .infinity)
+                .background(.yellow.opacity(0.2))
+        }
+    }
+}
+
+/// The Folders / Date switch above the library. Its own view, reading only
+/// its own setting, so a library refresh never re-measures it: measuring a
+/// segmented control is unusually costly in SwiftUI on macOS (each pass tears
+/// down and rebuilds observation tracking for the segment labels), and it was
+/// the single biggest cost in the idle redraws that made the app slow.
+private struct LibraryGroupingPicker: View {
+    @AppStorage("libraryGrouping") private var grouping = "folders"
+
+    var body: some View {
+        Picker("", selection: $grouping) {
+            Text("Folders").tag("folders")
+            Text("Date").tag("date")
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+    }
+}
+
+struct LibraryList: View {
+    @EnvironmentObject var model: AppModel
+    // Folders start expanded; a folder the user collapses is remembered here.
+    @State private var collapsed: Set<String> = []
+    @AppStorage("libraryGrouping") private var grouping = "folders"
+    // Right-click actions mirror the meeting view's three-dots menu, with the
+    // same confirmations before anything destructive or edit-clobbering.
+    @State private var pendingDelete: MeetingSummaryRow?
+    @State private var pendingRegenerateID: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            LibraryGroupingPicker()
+            Divider()
+            if grouping == "date" { dateList } else { folderList }
+        }
+        .navigationSplitViewColumnWidth(min: 240, ideal: 300)
+        .alert("Delete this meeting?", isPresented: Binding(
+            get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })) {
+            Button("Delete", role: .destructive) {
+                guard let meeting = pendingDelete else { return }
+                Task {
+                    try? await model.client.deleteMeeting(meeting.id)
+                    if model.selectedMeetingID == meeting.id { model.selectedMeetingID = nil }
+                    await model.refreshLibrary()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The recording, transcript, summary, and notes are removed "
+                 + "from the vault. Voices you have named stay remembered.")
+        }
+        .alert("Regenerate the summary?", isPresented: Binding(
+            get: { pendingRegenerateID != nil }, set: { if !$0 { pendingRegenerateID = nil } })) {
+            Button("Regenerate") {
+                guard let id = pendingRegenerateID else { return }
+                Task {
+                    try? await model.client.regenerateSummary(id)
+                    await model.refreshLibrary()
+                }
+            }
+            Button("Keep my edits", role: .cancel) {}
+        } message: {
+            Text("You have edited this summary by hand. Regenerating replaces "
+                 + "your edits with a fresh summary written from the transcript "
+                 + "and the current notes.")
+        }
+    }
+
+    private var folderList: some View {
+        List(selection: $model.selectedMeetingID) {
+            ForEach(model.library) { group in
+                Section(isExpanded: expanded(group.id)) {
+                    ForEach(group.meetings) { meeting in
+                        meetingRow(meeting).tag(meeting.id)
+                    }
+                } header: {
+                    Text(group.folder ?? "Unfiled")
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .contextMenu(forSelectionType: String.self) { rowMenu(for: $0) }
+        .refreshable { await model.refreshLibrary() }
+        .task { await model.refreshLibrary() }
+    }
+
+    private var dateBuckets: [(name: String, meetings: [MeetingSummaryRow])] {
+        let now = Date()
+        let all = model.library.flatMap(\.meetings)
+            .sorted { $0.started_at > $1.started_at }
+        var byBucket: [String: [MeetingSummaryRow]] = [:]
+        for meeting in all {
+            byBucket[DateGrouping.bucket(for: meeting.started_at, now: now), default: []].append(meeting)
+        }
+        return byBucket
+            .sorted { DateGrouping.sortIndex(of: $0.key) < DateGrouping.sortIndex(of: $1.key) }
+            .map { ($0.key, $0.value) }
+    }
+
+    private var dateList: some View {
+        List(selection: $model.selectedMeetingID) {
+            ForEach(dateBuckets, id: \.name) { bucket in
+                Section(bucket.name) {
+                    ForEach(bucket.meetings) { meeting in
+                        meetingRow(meeting, showFolder: true, showTime: true).tag(meeting.id)
+                    }
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .contextMenu(forSelectionType: String.self) { rowMenu(for: $0) }
+        .refreshable { await model.refreshLibrary() }
+    }
+
+    private func expanded(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { !collapsed.contains(id) },
+            set: { isExpanded in
+                if isExpanded { collapsed.remove(id) } else { collapsed.insert(id) }
+            })
+    }
+
+    private func meetingRow(_ meeting: MeetingSummaryRow, showFolder: Bool = false,
+                            showTime: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(meeting.title).fontWeight(.medium)
+            HStack(spacing: 6) {
+                Text(meeting.date)
+                if showTime, let time = DateGrouping.timeOfDay(meeting.started_at) {
+                    Text(time)
+                }
+                if showFolder, let folder = meeting.folder {
+                    Text(folder)
+                } else if !meeting.attendees.isEmpty {
+                    Text(meeting.attendees.joined(separator: ", "))
+                        .lineLimit(1)
+                }
+                StatusLabel(meeting: meeting)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    /// The row actions, as one list-level context menu keyed on the right-clicked
+    /// item. This replaces a per-row `.contextMenu`, which is a heavy per-row
+    /// cost that made selecting and scrolling a large library sluggish; the
+    /// list-level menu is built lazily only when a row is actually right-clicked.
+    /// The row does not carry the vault path or the edited flag, so those are
+    /// fetched on demand; the confirmations match the detail screen's exactly.
+    @ViewBuilder
+    private func rowMenu(for ids: Set<String>) -> some View {
+        if let id = ids.first, let meeting = meetingByID(id) {
+            Button("Reveal in Finder") {
+                Task {
+                    if let detail = try? await model.client.meeting(id) {
+                        model.revealInFinder(path: detail.reveal_path)
+                    }
+                }
+            }
+            Button("Regenerate summary") {
+                Task {
+                    guard let detail = try? await model.client.meeting(id) else { return }
+                    if detail.summary_edited == 1 {
+                        pendingRegenerateID = id
+                    } else {
+                        try? await model.client.regenerateSummary(id)
+                        await model.refreshLibrary()
+                    }
+                }
+            }
+            // No transcript to summarise yet while the recording is still being
+            // captured or transcribed; the detail menu disables on the same rule.
+            .disabled(["recording", "queued", "transcribing"].contains(meeting.processing_status))
+            Divider()
+            Button("Delete meeting", role: .destructive) { pendingDelete = meeting }
+        }
+    }
+
+    private func meetingByID(_ id: String) -> MeetingSummaryRow? {
+        for group in model.library {
+            if let meeting = group.meetings.first(where: { $0.id == id }) { return meeting }
+        }
+        return nil
+    }
+}
+
+struct StatusLabel: View {
+    let meeting: MeetingSummaryRow
+
+    var body: some View {
+        switch meeting.processing_status {
+        case "ready" where meeting.summary_status == "pending":
+            Text("summary pending").foregroundStyle(.orange)
+        case "ready":
+            EmptyView()
+        case "failed":
+            Text("failed: \(meeting.failed_stage ?? "processing")").foregroundStyle(.red)
+        default:
+            Text(meeting.processing_status).foregroundStyle(.blue)
+        }
+    }
+}
+
+struct RecordingBar: View {
+    @EnvironmentObject var model: AppModel
+    // Observed directly: the level meters live on the capture controller, and
+    // a nested ObservableObject does not republish through AppModel.
+    @ObservedObject var capture: CaptureController
+    @ObservedObject var calendar: CalendarWatcher
+    @ObservedObject var microphones: MicrophoneListModel
+    @State private var showSettings = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let offer = calendar.offer, !capture.isCapturing {
+                HStack(spacing: 10) {
+                    Image(systemName: "calendar.badge.clock")
+                    Text(offer.reason)
+                    if !offer.attendees.isEmpty {
+                        Text(offer.attendees.map(\.name).joined(separator: ", "))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button("Start recording") { accept(offer) }
+                        .buttonStyle(.borderedProminent)
+                    Button("Not now") { calendar.dismiss() }
+                }
+                .font(.callout)
+                .padding(8)
+                .background(.blue.opacity(0.12))
+            }
+            recordingControls
+        }
+    }
+
+    private func accept(_ offer: CalendarWatcher.Offer) {
+        model.acceptOffer(offer)
+    }
+
+    private var recordingControls: some View {
+        HStack(spacing: 14) {
+            if capture.isCapturing {
+                Label("Recording", systemImage: "record.circle.fill")
+                    .foregroundStyle(.red)
+                LevelBar(label: "Microphone", level: capture.microphoneLevel)
+                LevelBar(label: "System audio", level: capture.systemLevel)
+            }
+            // The microphone can be changed at any time, including mid-recording.
+            Picker("Microphone", selection: $microphones.selection) {
+                ForEach(microphones.devices) { device in
+                    Text(device.name).tag(Optional(device))
+                }
+            }
+            .frame(maxWidth: capture.isCapturing ? 220 : 300)
+            .onChange(of: microphones.selection) { _, newValue in
+                if capture.isCapturing, let device = newValue {
+                    Task { await capture.switchInput(to: device.captureDeviceID) }
+                }
+            }
+            Spacer()
+            if let message = model.lastRecordingMessage {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+            }
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.borderless)
+            .help("Settings")
+        }
+        .padding(10)
+        .sheet(isPresented: $showSettings) {
+            SettingsSheet().environmentObject(model)
+        }
+    }
+}
+
+struct LevelBar: View {
+    let label: String
+    let level: Float
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            ProgressView(value: min(1, level * 3))
+                .frame(width: 130)
+        }
+    }
+}
