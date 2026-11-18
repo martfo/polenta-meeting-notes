@@ -167,6 +167,7 @@ struct MeetingDetailScreen: View {
                     Button("Reveal in Finder") {
                         model.revealInFinder(path: detail.reveal_path)
                     }
+                    Button("Copy Link") { model.copyNoteLink(meetingID: meetingID) }
                     Button("Regenerate summary") {
                         if detail.summary_edited == 1 {
                             showRegeneratePrompt = true

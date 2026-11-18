@@ -22,6 +22,14 @@ struct MeetingNotesApp: App {
                     GlobalHotKey.shared.action = { [weak model] in model?.toggleRecording() }
                     GlobalHotKey.shared.applyFromDefaults()
                 }
+                // polenta://note/<meeting_id>, from the task manager's action
+                // items. Launches or foregrounds the app on that meeting.
+                .onOpenURL { url in model.openNoteLink(url) }
+                // Route every link to the window already open. Without this,
+                // SwiftUI opens a new window per link (and each new window's
+                // onAppear rebooted the backend). With no window open, SwiftUI
+                // still makes one.
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
         }
     }
 }
@@ -785,6 +793,7 @@ struct LibraryList: View {
                     }
                 }
             }
+            Button("Copy Link") { model.copyNoteLink(meetingID: id) }
             Button("Regenerate summary") {
                 Task {
                     guard let detail = try? await model.client.meeting(id) else { return }
@@ -873,6 +882,12 @@ struct RecordingBar: View {
                     .foregroundStyle(.red)
                 LevelBar(label: "Microphone", level: capture.microphoneLevel)
                 LevelBar(label: "System audio", level: capture.systemLevel)
+                if capture.microphoneWarning {
+                    Label("Your microphone isn't being recorded. Reconnecting…",
+                          systemImage: "mic.slash")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
             // The microphone can be changed at any time, including mid-recording.
             Picker("Microphone", selection: $microphones.selection) {

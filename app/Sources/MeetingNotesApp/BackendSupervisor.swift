@@ -80,6 +80,9 @@ final class BackendSupervisor: ObservableObject {
         }
     }
 
+    /// True while this supervisor has a live backend child.
+    var isProcessRunning: Bool { process?.isRunning == true }
+
     func stop() {
         monitorTask?.cancel()
         process?.terminate()

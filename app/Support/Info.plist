@@ -28,5 +28,18 @@
 	<string>Polenta Meeting Notes reads your calendar, on this Mac only, to offer to record when a meeting is due and to suggest attendee names for the voices it hears. It never changes anything in your calendar.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Polenta meeting link</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>polenta</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+		</dict>
+	</array>
 </dict>
 </plist>

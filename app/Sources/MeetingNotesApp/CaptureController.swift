@@ -1,7 +1,9 @@
 // Drives one recording: the process tap for system audio plus AVAudioEngine
 // for the microphone, live level meters for both, and the mixdown to one
 // 16 kHz mono WAV on stop. In-person meetings are the same path with system
-// audio silent; the classifier notices and labels the meeting.
+// audio silent; the classifier notices and labels the meeting. The
+// microphone is restarted whenever macOS stops it (see MicrophoneWatchdog), so
+// the owner's side is kept for the whole meeting.
 
 import AVFoundation
 import CoreAudio
@@ -18,13 +20,31 @@ final class CaptureController: ObservableObject {
     @Published var microphoneLevel: Float = 0
     @Published var systemLevel: Float = 0
     @Published private(set) var isCapturing = false
+    /// The microphone has delivered nothing for a while and is being
+    /// restarted; shown beside the level meters.
+    @Published private(set) var microphoneWarning = false
 
     // The audio machinery is driven off the main thread (see start/stop), so
     // that Core Audio setup, which can block while the tap and aggregate
     // device are created, never freezes the UI. Access is serialised by
     // ioQueue and accumulationQueue.
     nonisolated(unsafe) private let tap = SystemAudioTap()
-    nonisolated(unsafe) private let engine = AVAudioEngine()
+    // Replaced on every microphone (re)start: an engine that has seen its
+    // input change keeps the old format, and a fresh one reads the current one.
+    nonisolated(unsafe) private var engine = AVAudioEngine()
+    nonisolated(unsafe) private var configurationObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var watchdog: DispatchSourceTimer?
+    // Recording state for the watchdog, touched only on ioQueue. nil follows
+    // the system default input.
+    nonisolated(unsafe) private var microphoneDeviceID: AudioDeviceID?
+    nonisolated(unsafe) private var recording = false
+    nonisolated(unsafe) private var restartPending = false
+    nonisolated(unsafe) private var warningShown = false
+    nonisolated(unsafe) private var recordingStartedSeconds: Double = 0
+    nonisolated(unsafe) private var lastMicrophoneRestartSeconds: Double = 0
+    // When microphone audio last arrived (0 for none yet), written on the
+    // audio thread and read by the watchdog; a plain Double is atomic on 64-bit.
+    nonisolated(unsafe) private var lastMicrophoneBufferSeconds: Double = 0
     nonisolated(unsafe) private let classifier = SourceClassifier()
 
     // Streams are resampled to 16 kHz as they arrive and accumulated as
@@ -78,7 +98,12 @@ final class CaptureController: ObservableObject {
             systemSamples = []
             originHostSeconds = nil
         }
-        lastSystemActivitySeconds = Date().timeIntervalSinceReferenceDate
+        let now = Date().timeIntervalSinceReferenceDate
+        lastSystemActivitySeconds = now
+        recordingStartedSeconds = now
+        lastMicrophoneBufferSeconds = 0
+        self.microphoneDeviceID = microphoneDeviceID
+        recording = true
 
         try tap.start()
         // The delivery rate arrives per buffer, measured from the stream's own
@@ -99,10 +124,82 @@ final class CaptureController: ObservableObject {
             Task { @MainActor in self.systemLevel = level }
         }
 
-        if let microphoneDeviceID {
-            try selectInput(device: microphoneDeviceID)
+        // A microphone that cannot start yet does not stop the recording: the
+        // watchdog keeps retrying it, and the person sees a warning meanwhile.
+        startMicrophone()
+        startWatchdog()
+    }
+
+    /// Starts, or restarts, the microphone on a fresh engine. Called on ioQueue.
+    nonisolated private func startMicrophone() {
+        lastMicrophoneRestartSeconds = Date().timeIntervalSinceReferenceDate
+        stopMicrophone()
+        engine = AVAudioEngine()
+        // macOS stops the engine when its input changes (AirPods switching to
+        // call mode, a device plugged in or removed). Restart once the change
+        // has settled; several notices in a row become one restart.
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.ioQueue.async { self.scheduleRestartAfterConfigurationChange() }
         }
-        try installMicTapAndStart()
+        do {
+            if let microphoneDeviceID {
+                try selectInput(device: microphoneDeviceID)
+            }
+            try installMicTapAndStart()
+        } catch {
+            captureLog.error("could not start the microphone: \(error.localizedDescription, privacy: .public); retrying")
+        }
+    }
+
+    nonisolated private func stopMicrophone() {
+        if let configurationObserver {
+            NotificationCenter.default.removeObserver(configurationObserver)
+        }
+        configurationObserver = nil
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+    }
+
+    nonisolated private func scheduleRestartAfterConfigurationChange() {
+        guard recording, !restartPending else { return }
+        restartPending = true
+        captureLog.notice("microphone input changed; restarting it")
+        ioQueue.asyncAfter(deadline: .now() + 0.5) {
+            self.restartPending = false
+            if self.recording { self.startMicrophone() }
+        }
+    }
+
+    /// Once a second, restart a microphone that has stopped delivering and
+    /// tell the person while it is not being recorded.
+    nonisolated private func startWatchdog() {
+        let timer = DispatchSource.makeTimerSource(queue: ioQueue)
+        timer.schedule(deadline: .now() + 1, repeating: 1)
+        timer.setEventHandler { [weak self] in self?.checkMicrophone() }
+        timer.resume()
+        watchdog = timer
+    }
+
+    nonisolated private func checkMicrophone() {
+        guard recording else { return }
+        let last = lastMicrophoneBufferSeconds
+        let verdict = MicrophoneWatchdog.check(
+            now: Date().timeIntervalSinceReferenceDate,
+            lastBufferAt: last > 0 ? last : nil,
+            startedAt: recordingStartedSeconds,
+            lastRestartAt: lastMicrophoneRestartSeconds)
+        if verdict.restart {
+            captureLog.warning("no microphone audio is arriving; restarting the microphone")
+            startMicrophone()
+        }
+        if verdict.warn != warningShown {
+            warningShown = verdict.warn
+            let warn = verdict.warn
+            Task { @MainActor in self.microphoneWarning = warn }
+        }
     }
 
     nonisolated private func installMicTapAndStart() throws {
@@ -117,14 +214,15 @@ final class CaptureController: ObservableObject {
         // exception that still slips through (a device change mid-call) is
         // caught. A tap format of nil makes the engine use the node's own
         // format, so there is no stale format to mismatch. If the microphone
-        // cannot be tapped safely, record the system audio alone rather than
-        // crash.
+        // cannot be tapped safely yet, carry on with the system audio rather
+        // than crash; the watchdog tries again on a fresh engine.
         let micUsable = output.channelCount > 0 && output.sampleRate > 0
             && hardware.sampleRate > 0 && hardware.sampleRate == output.sampleRate
         if micUsable {
             let failure = ObjCTryCatch {
                 input.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, when in
                     guard let self, let channel = buffer.floatChannelData?[0] else { return }
+                    self.lastMicrophoneBufferSeconds = Date().timeIntervalSinceReferenceDate
                     let mono = Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
                     let level = LevelMeter.level(of: mono)
                     let resampled = AudioMixer.resample(mono, from: buffer.format.sampleRate)
@@ -136,10 +234,10 @@ final class CaptureController: ObservableObject {
                 }
             }
             if failure != nil {
-                captureLog.error("could not tap the microphone; recording system audio only")
+                captureLog.error("could not tap the microphone; retrying")
             }
         } else {
-            captureLog.warning("microphone format unavailable or mismatched; recording system audio only")
+            captureLog.warning("microphone format unavailable or mismatched; retrying")
         }
         engine.prepare()
         try engine.start()
@@ -188,27 +286,10 @@ final class CaptureController: ObservableObject {
     }
 
     nonisolated private func performSwitchInput(to deviceID: AudioDeviceID?) {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        do {
-            try selectInput(device: deviceID ?? Self.defaultInputDevice())
-            try installMicTapAndStart()
-        } catch {
-            // Leave the microphone off rather than crash; system audio and the
-            // recording continue.
-        }
-    }
-
-    nonisolated private static func defaultInputDevice() -> AudioDeviceID {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain)
-        var deviceID = AudioDeviceID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        _ = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID)
-        return deviceID
+        // A fresh engine follows the system default by itself when deviceID
+        // is nil. A failure here is retried by the watchdog.
+        microphoneDeviceID = deviceID
+        startMicrophone()
     }
 
     /// Stops capture off the main thread and returns the microphone and system
@@ -220,14 +301,18 @@ final class CaptureController: ObservableObject {
             }
         }
         isCapturing = false
+        microphoneWarning = false
         microphoneLevel = 0
         systemLevel = 0
         return result
     }
 
     nonisolated private func performStop() -> CaptureResult {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        recording = false
+        watchdog?.cancel()
+        watchdog = nil
+        warningShown = false
+        stopMicrophone()
         tap.onBuffer = nil
         tap.stop()
 

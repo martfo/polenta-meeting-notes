@@ -65,8 +65,14 @@ final class AppModel: ObservableObject {
         bootBackend()
     }
 
+    /// A second window (File > New Window, or one opened for an incoming
+    /// link) calls this from its onAppear too. While a backend is running it
+    /// is left alone: a second supervisor would kill it as an orphan, losing
+    /// any job in flight. With none running (first run, before provisioning
+    /// finished) it boots as before.
     func bootBackend() {
         guard let vaultURL else { return }
+        if let supervisor, supervisor.isProcessRunning { return }
         let coordinator = RecordingCoordinator(
             capturesDirectory: vaultURL.appendingPathComponent("captures"),
             backend: client,
@@ -330,6 +336,64 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: - Shortcuts into the vault
+
+    // MARK: - Links from other apps
+
+    /// `polenta://note/<meeting_id>` selects that meeting. A link that is not
+    /// a meeting, or names a meeting this vault does not have, leaves the
+    /// window as it was and says so in the status line for a few seconds.
+    /// Other schemes and hosts are ignored.
+    func openNoteLink(_ url: URL) {
+        let link = NoteLink.parse(url)
+        switch link {
+        case .ignored:
+            return
+        case .malformed:
+            NSApp.activate(ignoringOtherApps: true)
+            showNotice(NoteLink.notice(for: link))
+        case .note(let id):
+            NSApp.activate(ignoringOtherApps: true)
+            guard let vaultURL else {
+                showNotice("Choose a vault first, then open the link again.")
+                return
+            }
+            guard NoteLink.meetingFolder(id: id, vault: vaultURL) != nil else {
+                showNotice(NoteLink.notice(forUnknownID: id))
+                return
+            }
+            selectedMeetingID = id
+            // A meeting the library has not listed yet (the app may have just
+            // launched) appears once the backend answers.
+            Task { await refreshLibrary() }
+        }
+    }
+
+    /// Puts the meeting's polenta://note link on the clipboard, as plain text
+    /// and as a URL, so it pastes as a link where the target app supports one.
+    func copyNoteLink(meetingID: String) {
+        guard let url = NoteLink.url(forMeetingID: meetingID) else {
+            showNotice("This meeting has no link to copy.")
+            return
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.declareTypes([.URL, .string], owner: nil)
+        (url as NSURL).write(to: pasteboard)
+        pasteboard.setString(url.absoluteString, forType: .string)
+        showNotice("Link copied.", for: 3)
+    }
+
+    /// A status-line message that clears itself unless something else has
+    /// replaced it meanwhile.
+    private func showNotice(_ text: String?, for seconds: Double = 8) {
+        guard let text else { return }
+        lastRecordingMessage = text
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard let self, self.lastRecordingMessage == text else { return }
+            self.lastRecordingMessage = nil
+        }
+    }
 
     func revealInFinder(path: String) {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
