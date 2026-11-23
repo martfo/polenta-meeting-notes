@@ -12,15 +12,19 @@ public struct PendingRecording: Codable, Equatable, Sendable {
     public let title: String
     public let source: String
     public let recordedAt: Date
+    /// The placeholder meeting created when recording started, if the
+    /// backend was up then; the audio is attached to it.
+    public let meetingID: String?
 
     public init(audioPath: String, micPath: String? = nil, systemPath: String? = nil,
-                title: String, source: String, recordedAt: Date) {
+                title: String, source: String, recordedAt: Date, meetingID: String? = nil) {
         self.audioPath = audioPath
         self.micPath = micPath
         self.systemPath = systemPath
         self.title = title
         self.source = source
         self.recordedAt = recordedAt
+        self.meetingID = meetingID
     }
 }
 
@@ -43,10 +47,11 @@ public struct CaptureResult: Sendable {
 /// What the coordinator needs from the backend: enqueue-and-return-at-once.
 public protocol BackendEnqueuing {
     /// Throws when the backend is unreachable. micPath and systemPath carry
-    /// the separate channels when the recording was captured as two streams.
+    /// the separate channels when the recording was captured as two streams;
+    /// meetingID is the recording's placeholder to attach the audio to.
     @discardableResult
     func importMeeting(audioPath: String, micPath: String?, systemPath: String?,
-                       title: String, source: String) throws -> String
+                       title: String, source: String, meetingID: String?) throws -> String
 }
 
 /// Pending recordings survive an app restart, so the store is a file.
@@ -120,7 +125,7 @@ public final class RecordingCoordinator {
     /// and hand them to the backend. Returns at once either way; recording can
     /// start again immediately.
     @discardableResult
-    public func stop(_ result: CaptureResult, title: String) throws -> StopOutcome {
+    public func stop(_ result: CaptureResult, title: String, meetingID: String? = nil) throws -> StopOutcome {
         isRecording = false
 
         // A header-only or empty mixed buffer captured nothing (a tap that
@@ -142,7 +147,7 @@ public final class RecordingCoordinator {
 
         let recording = PendingRecording(
             audioPath: audioURL.path, micPath: micURL.path, systemPath: systemURL.path,
-            title: title, source: result.source.rawValue, recordedAt: clock())
+            title: title, source: result.source.rawValue, recordedAt: clock(), meetingID: meetingID)
         do {
             return .enqueued(meetingID: try enqueue(recording))
         } catch {
@@ -155,16 +160,21 @@ public final class RecordingCoordinator {
         try backend.importMeeting(
             audioPath: recording.audioPath, micPath: recording.micPath,
             systemPath: recording.systemPath, title: recording.title,
-            source: recording.source)
+            source: recording.source, meetingID: recording.meetingID)
     }
 
     /// Called when the backend becomes reachable: enqueue whatever capture
-    /// saved while it was down. Jobs that still fail stay pending.
+    /// saved while it was down. Jobs that still fail stay pending. A job whose
+    /// audio is gone (already handed over, the backend then removing the
+    /// capture) or holds no audio is dropped, so it is not retried forever.
     @discardableResult
     public func flushPending() -> Int {
         var remaining: [PendingRecording] = []
         var flushed = 0
         for job in pending.all() {
+            let size = (try? FileManager.default.attributesOfItem(atPath: job.audioPath)[.size]
+                        as? Int) ?? nil
+            guard let size, size > minimumRecordingBytes else { continue }
             do {
                 _ = try enqueue(job)
                 flushed += 1
@@ -174,5 +184,16 @@ public final class RecordingCoordinator {
         }
         pending.replace(with: remaining)
         return flushed
+    }
+
+    /// Recordings saved but not yet handed to the backend.
+    public func pendingRecordings() -> [PendingRecording] {
+        pending.all()
+    }
+
+    /// Placeholders whose audio is saved but not yet handed to the backend,
+    /// so they are not mistaken for recordings abandoned by a crash.
+    public func pendingMeetingIDs() -> [String] {
+        pending.all().compactMap(\.meetingID)
     }
 }

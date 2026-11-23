@@ -16,7 +16,9 @@ struct MeetingNotesApp: App {
                 .environmentObject(model)
                 .frame(minWidth: 980, minHeight: 640)
                 .onAppear {
-                    if model.vaultURL != nil { model.bootBackend() }
+                    // While setup is due the runtime is about to be replaced, so
+                    // no backend starts from it; setup boots one when it is done.
+                    if model.vaultURL != nil, !RootView.firstRunNeeded() { model.bootBackend() }
                     // The global hotkey toggles recording even when another
                     // app has focus.
                     GlobalHotKey.shared.action = { [weak model] in model?.toggleRecording() }
@@ -57,7 +59,7 @@ struct RootView: View {
             } else if needsFirstRun {
                 FirstRunView {
                     needsFirstRun = false
-                    model.bootBackend()
+                    model.bootBackend(restart: true)
                 }
             } else {
                 MainSplit()
@@ -347,6 +349,8 @@ struct SettingsSheet: View {
 
                 OwnerNameSection()
 
+                StorageSection()
+
                 Section("Summaries") {
                     LabeledContent {
                         Button("Open") { model.editSummaryPrompt() }
@@ -483,6 +487,190 @@ struct SettingsSheet: View {
     }
 }
 
+/// How big the library is, what takes the space, and how long recordings
+/// are kept. Nothing is removed without the person first seeing exactly what
+/// a new setting would remove.
+struct StorageSection: View {
+    @EnvironmentObject var model: AppModel
+    @State private var usage: LibraryStorage?
+    @State private var keepDays: Int?
+    @State private var archiveDir: String?
+    @State private var pending: (keepDays: Int?, archiveDir: String?, preview: RetentionPreview)?
+    @State private var confirming = false
+    @State private var status: String?
+
+    static let periods: [(label: String, days: Int?)] = [
+        ("Forever", nil), ("1 year", 365), ("6 months", 182), ("90 days", 90), ("30 days", 30),
+    ]
+
+    private var size: (Int64) -> String { DiskSpace.format }
+
+    var body: some View {
+        Section("Storage") {
+            if let usage {
+                LabeledContent("Library") {
+                    Text("\(size(usage.total_bytes)) for \(usage.meetings) meetings")
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Recordings \(size(usage.parts.recordings)) (\(usage.meetings_with_audio) meetings)")
+                    if usage.parts.captures > 0 {
+                        Text("Raw captures not in any meeting \(size(usage.parts.captures))")
+                    }
+                    Text("Transcripts, summaries and notes \(size(usage.parts.notes_and_transcripts))")
+                    Text("Search index \(size(usage.parts.search_index)), other "
+                         + "\(size(usage.parts.other))")
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                LabeledContent("Last 30 days") {
+                    Text("\(size(usage.last_30_days.bytes)) of recordings "
+                         + "(\(String(format: "%.1f", usage.last_30_days.hours)) hours)")
+                }
+                LabeledContent("Disk") {
+                    Text("\(size(usage.disk.free_bytes)) free of \(size(usage.disk.total_bytes))")
+                        .foregroundStyle(DiskSpace.warning(freeBytes: usage.disk.free_bytes) == nil
+                                         ? Color.primary : Color.orange)
+                }
+            } else {
+                Text("Measuring…").foregroundStyle(.secondary)
+            }
+
+            Picker("Keep recordings for", selection: Binding(
+                get: { keepDays }, set: { propose(keepDays: $0, archiveDir: archiveDir) })) {
+                ForEach(Self.periods, id: \.label) { Text($0.label).tag($0.days) }
+            }
+            if keepDays != nil {
+                Picker("After that", selection: Binding(
+                    get: { archiveDir == nil ? "delete" : "move" },
+                    set: { choice in
+                        if choice == "delete" {
+                            propose(keepDays: keepDays, archiveDir: nil)
+                        } else {
+                            chooseArchiveFolder()
+                        }
+                    })) {
+                    Text("Delete the recording").tag("delete")
+                    Text("Move it to a folder").tag("move")
+                }
+                if let archiveDir {
+                    LabeledContent {
+                        Button("Change…") { chooseArchiveFolder() }
+                    } label: {
+                        Text(archiveDir).font(.caption).lineLimit(2).truncationMode(.middle)
+                    }
+                }
+            }
+            Text("Recordings are only needed to process a meeting again. Transcripts, "
+                 + "summaries, notes, screenshots, speakers and search are always kept. "
+                 + "Meetings still processing, or with a problem, keep their recording.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let problem = usage?.retention.problem {
+                Text(problem).font(.caption).foregroundStyle(.orange)
+            }
+            if let status {
+                Text(status).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .task { await load(resetChoice: true) }
+        .confirmationDialog(confirmTitle, isPresented: $confirming, titleVisibility: .visible) {
+            Button(pending?.archiveDir == nil ? "Delete recordings" : "Move recordings",
+                   role: pending?.archiveDir == nil ? .destructive : nil) { apply() }
+            Button("Cancel", role: .cancel) { pending = nil }
+        } message: {
+            Text(confirmMessage)
+        }
+    }
+
+    private var confirmTitle: String {
+        guard let pending else { return "" }
+        let what = "\(pending.preview.meetings) meeting\(pending.preview.meetings == 1 ? "" : "s")"
+        return pending.archiveDir == nil
+            ? "Delete the recordings of \(what)?"
+            : "Move the recordings of \(what)?"
+    }
+
+    private var confirmMessage: String {
+        guard let pending else { return "" }
+        let amount = "\(String(format: "%.1f", pending.preview.hours)) hours, "
+            + "\(size(pending.preview.bytes))"
+        let rest = "Transcripts, summaries and notes are kept. From now on, recordings are "
+            + "removed as they pass that age."
+        if let folder = pending.archiveDir {
+            return "Recordings older than the period (\(amount)) move to \(folder). \(rest)"
+        }
+        return "Recordings older than the period (\(amount)) are deleted and cannot be "
+            + "recovered. \(rest)"
+    }
+
+    private func load(resetChoice: Bool) async {
+        guard let loaded = try? await model.client.storage() else { return }
+        usage = loaded
+        if resetChoice {
+            keepDays = loaded.retention.keep_days
+            archiveDir = loaded.retention.archive_dir
+        }
+    }
+
+    private func chooseArchiveFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Move recordings here"
+        panel.message = "Choose where old recordings go, such as an external drive. "
+            + "They are moved there, never copied anywhere else."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        propose(keepDays: keepDays, archiveDir: url.path)
+    }
+
+    /// Show what the choice would remove now, and save only on a yes. Keeping
+    /// recordings for longer removes nothing, so it is saved at once.
+    private func propose(keepDays newDays: Int?, archiveDir newDir: String?) {
+        status = nil
+        Task {
+            do {
+                guard let days = newDays else {
+                    try await save(keepDays: nil, archiveDir: nil)
+                    return
+                }
+                let preview = try await model.client.retentionPreview(keepDays: days)
+                if preview.meetings == 0 {
+                    try await save(keepDays: days, archiveDir: newDir)
+                } else {
+                    pending = (days, newDir, preview)
+                    confirming = true
+                }
+            } catch {
+                status = error.localizedDescription
+            }
+        }
+    }
+
+    private func apply() {
+        guard let pending else { return }
+        Task {
+            do {
+                try await save(keepDays: pending.keepDays, archiveDir: pending.archiveDir)
+                status = pending.archiveDir == nil
+                    ? "Deleting old recordings…" : "Moving old recordings…"
+                try? await Task.sleep(for: .seconds(3))
+                await load(resetChoice: false)
+                status = nil
+            } catch {
+                status = error.localizedDescription
+            }
+            self.pending = nil
+        }
+    }
+
+    private func save(keepDays newDays: Int?, archiveDir newDir: String?) async throws {
+        try await model.client.setRetention(keepDays: newDays, archiveDir: newDir)
+        keepDays = newDays
+        archiveDir = newDays == nil ? nil : newDir
+        await load(resetChoice: false)
+        model.checkDiskSpace()
+    }
+}
+
 struct MeetingPromptSection: View {
     @EnvironmentObject var model: AppModel
     @AppStorage(MeetingPromptPreference.enabledKey) private var enabled = true
@@ -600,6 +788,12 @@ struct StatusBanner: View {
     var body: some View {
         if let supervisor = model.supervisor {
             SupervisorBanner(supervisor: supervisor)
+        }
+        if let warning = model.lowDiskWarning {
+            Label(warning, systemImage: "externaldrive.badge.exclamationmark")
+                .padding(8)
+                .frame(maxWidth: .infinity)
+                .background(.orange.opacity(0.25))
         }
     }
 }
@@ -832,6 +1026,8 @@ struct StatusLabel: View {
             EmptyView()
         case "failed":
             Text("failed: \(meeting.failed_stage ?? "processing")").foregroundStyle(.red)
+        case "recording":
+            Label("recording", systemImage: "record.circle.fill").foregroundStyle(.red)
         default:
             Text(meeting.processing_status).foregroundStyle(.blue)
         }

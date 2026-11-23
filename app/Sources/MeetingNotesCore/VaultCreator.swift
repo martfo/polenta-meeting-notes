@@ -34,7 +34,6 @@ public enum VaultCreator {
           "language": "en",
           "match_threshold": 0.75,
           "veto_margin": 0.1,
-          "audio_retention_days": 30,
           "ocr_enabled": true,
           "log_level": "info"
         }

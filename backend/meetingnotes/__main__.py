@@ -6,8 +6,10 @@ checks answer at once."""
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
+import time
 from pathlib import Path
 
 # Before torch is imported anywhere: let the Apple GPU (MPS) fall back to CPU
@@ -144,10 +146,41 @@ def main(config_path: str) -> None:
     )
     from meetingnotes.jobs.worker import enqueue_pending_summaries
 
-    worker = Worker(
-        conn, stages,
-        on_idle=lambda: enqueue_pending_summaries(conn, lm_client),
-    )
+    from meetingnotes.storage.retention import apply_retention, get_policy
+
+    retention_due = [0.0]
+
+    def on_idle() -> int:
+        enqueued = enqueue_pending_summaries(conn, lm_client)
+        # Old audio goes as meetings age past the chosen period, checked
+        # hourly while the queue is idle; the default (forever) does nothing.
+        if time.monotonic() >= retention_due[0]:
+            retention_due[0] = time.monotonic() + 3600
+            try:
+                apply_retention(conn, vault, get_policy(conn))
+            except Exception:
+                logging.getLogger("meetingnotes").warning(
+                    "audio retention run failed", exc_info=True)
+        return enqueued
+
+    def sweep_old_captures() -> None:
+        """Earlier versions kept every raw capture after copying it into its
+        meeting. Remove those duplicates; anything with no identical copy in
+        a meeting stays."""
+        from meetingnotes.storage.captures import sweep_captures
+
+        try:
+            swept = sweep_captures(vault)
+            if swept.removed:
+                logging.getLogger("meetingnotes").info(
+                    "removed %d duplicate captures (%d MB); %d kept",
+                    len(swept.removed), swept.bytes_freed // 1_048_576, len(swept.kept))
+        except Exception:
+            logging.getLogger("meetingnotes").warning("capture sweep failed", exc_info=True)
+
+    threading.Thread(target=sweep_old_captures, name="capture-sweep", daemon=True).start()
+
+    worker = Worker(conn, stages, on_idle=on_idle)
     worker.start()
     if not store.ready:
         threading.Thread(target=rebuild_search_index, name="index-rebuild", daemon=True).start()

@@ -13,6 +13,9 @@ from pydantic import BaseModel
 
 
 class Config(BaseModel):
+    # Unknown keys are ignored, so an older config.json still loads. (Audio
+    # retention used to sit here as audio_retention_days; it was never
+    # applied, and now lives in the settings table, chosen in the app.)
     vault_path: str
     backend_port: int = 8765
     lmstudio_base_url: str = "http://127.0.0.1:1234/v1"
@@ -21,7 +24,6 @@ class Config(BaseModel):
     owner_name: str = "Me"
     match_threshold: float = 0.75
     veto_margin: float = 0.10
-    audio_retention_days: int = 30
     ocr_enabled: bool = True
     silence_rms_threshold: float = 0.006
     # Domain vocabulary (product names, jargon, acronyms) fed to Whisper as an

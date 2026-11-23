@@ -14,6 +14,8 @@ struct MeetingDetailScreen: View {
     let meetingID: String
 
     @State private var detail: MeetingDetail?
+    /// Why a retry was refused (the recording is gone), shown in place.
+    @State private var retryRefusal: String?
     @State private var tab = "Summary"
     @State private var notesDraft = ""
     @State private var lastSavedNotes = ""
@@ -31,6 +33,7 @@ struct MeetingDetailScreen: View {
     @AppStorage(Appearance.sizeKey) private var baseFontSize = Appearance.defaultSize
     @AppStorage(Appearance.designKey) private var fontDesign = "system"
     @State private var pasteMonitor: Any?
+    @State private var autosaveTask: Task<Void, Never>?
     @State private var showRegeneratePrompt = false
     @State private var keepEditsChosen = false
     @State private var showDeleteConfirm = false
@@ -46,6 +49,7 @@ struct MeetingDetailScreen: View {
         VStack(spacing: 0) {
             if let detail {
                 header(detail)
+                if isRecording { recordingBanner }
                 DetailTabPicker(tab: $tab)
                 content(detail)
                 if !chatDrawerOpen {
@@ -108,6 +112,11 @@ struct MeetingDetailScreen: View {
             chatDrawerOpen = false
             keepEditsChosen = false
             await reload()
+            // A recording in progress opens on its notes, ready to type into.
+            if isRecording {
+                tab = "Notes"
+                notesFocused = true
+            }
             // Keep the open meeting fresh while it is still being processed, so
             // a stage change or failure shows without a click. Once it has
             // settled there is nothing to poll for, and stopping lets the summary
@@ -125,6 +134,21 @@ struct MeetingDetailScreen: View {
         guard let detail else { return false }
         if detail.processing_status == "failed" { return true }
         return detail.processing_status == "ready" && detail.summary_status != "pending"
+    }
+
+    /// The meeting is a placeholder for the recording in progress.
+    private var isRecording: Bool { detail?.processing_status == "recording" }
+
+    private var recordingBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "record.circle.fill").foregroundStyle(.red)
+            Text("Recording. Add notes, links and screenshots as you go; the transcript "
+                 + "and summary follow when you stop.")
+        }
+        .font(.callout)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(.red.opacity(0.08))
     }
 
     // MARK: - Header
@@ -157,7 +181,12 @@ struct MeetingDetailScreen: View {
                 if detail.processing_status == "failed" {
                     Button("Retry from \(detail.failed_stage ?? "the failed stage")") {
                         Task {
-                            try? await model.client.retry(meetingID)
+                            do {
+                                try await model.client.retry(meetingID)
+                                retryRefusal = nil
+                            } catch {
+                                retryRefusal = error.localizedDescription
+                            }
                             await reload()
                             await model.refreshLibrary()
                         }
@@ -198,10 +227,16 @@ struct MeetingDetailScreen: View {
                 .help("More actions: reveal in Finder, regenerate summary, delete")
             }
             if detail.processing_status == "failed" {
-                Text(detail.last_error ?? "Processing failed.")
+                Text(retryRefusal ?? detail.last_error ?? "Processing failed.")
                     .font(.caption)
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            if let removed = detail.audio_removed_at {
+                Label(Self.audioRemovedText(removedAt: removed, movedTo: detail.audio_archive_path),
+                      systemImage: "waveform.slash")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             HStack(spacing: 6) {
                 Image(systemName: "calendar")
@@ -251,6 +286,7 @@ struct MeetingDetailScreen: View {
                     .onChange(of: notesFocused) { _, focused in
                         if !focused { saveNotes() }
                     }
+                    .onChange(of: notesDraft) { _, _ in autosaveWhileRecording() }
                 let images = pastedImageURLs(in: notesDraft, revealPath: detail.reveal_path)
                 if !images.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -270,10 +306,22 @@ struct MeetingDetailScreen: View {
                     }
                     .frame(height: 96)
                 }
+                let links = Self.links(in: notesDraft)
+                if !links.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Links").font(.caption).foregroundStyle(.secondary)
+                        ForEach(links, id: \.self) { url in
+                            Link(url.absoluteString, destination: url)
+                                .font(.caption)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                }
                 HStack {
                     Text("Notes save on their own and feed into the summary; they are "
-                         + "never rewritten. Paste screenshots straight in; they are "
-                         + "stored with the meeting.")
+                         + "never rewritten. Paste links and screenshots straight in; they "
+                         + "are stored with the meeting.")
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("Paste image") { pasteImageFromPasteboard() }
@@ -298,7 +346,9 @@ struct MeetingDetailScreen: View {
     @ViewBuilder
     private func summaryTab(_ detail: MeetingDetail) -> some View {
         if detail.summary == nil {
-            MarkdownPane(text: detail.summary_status == "pending"
+            MarkdownPane(text: isRecording
+                ? "The summary is written once the recording stops."
+                : detail.summary_status == "pending"
                 ? "The summary is pending. It is written when LM Studio is reachable with a model loaded."
                 : "No summary yet.")
         } else if editingSummary {
@@ -393,6 +443,45 @@ struct MeetingDetailScreen: View {
                 handleSummaryAction(action)
             }
         }
+    }
+
+    /// While recording, notes are saved a moment after typing stops, so they
+    /// are safe if the app quits and are in place before the summary is
+    /// written. Afterwards they save when the editor loses focus, as each save
+    /// of a finished meeting refreshes its summary.
+    private func autosaveWhileRecording() {
+        guard isRecording else { return }
+        autosaveTask?.cancel()
+        autosaveTask = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            saveNotes()
+        }
+    }
+
+    /// The web and mail links in the notes, in order and without repeats, so
+    /// a pasted link can be opened with a click.
+    /// "Recording deleted on 20 Nov 2026 …" from the backend's ISO date.
+    static func audioRemovedText(removedAt: String, movedTo: String?) -> String {
+        let formatter = ISO8601DateFormatter()
+        let day = formatter.date(from: removedAt).map {
+            $0.formatted(date: .abbreviated, time: .omitted)
+        } ?? removedAt
+        if let movedTo {
+            return "Recording moved to \(movedTo) on \(day), under your retention setting."
+        }
+        return "Recording deleted on \(day), under your retention setting. "
+            + "The transcript, summary and notes are kept."
+    }
+
+    static func links(in notes: String) -> [URL] {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        else { return [] }
+        var seen = Set<URL>()
+        return detector.matches(in: notes, range: NSRange(notes.startIndex..., in: notes))
+            .compactMap(\.url)
+            .filter { ["http", "https", "mailto"].contains($0.scheme?.lowercased() ?? "") }
+            .filter { seen.insert($0).inserted }
     }
 
     private func handleSummaryAction(_ action: String) {

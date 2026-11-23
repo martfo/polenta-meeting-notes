@@ -18,14 +18,20 @@ from meetingnotes.storage.vault import Vault
 def purge_empty_recordings(conn: sqlite3.Connection, vault: Vault) -> list[str]:
     """Delete meetings whose audio file is empty or missing and that never
     produced a transcript. Returns the meeting ids removed."""
+    from meetingnotes.jobs.importer import has_notes
+
     removed: list[str] = []
-    for row in conn.execute("SELECT id FROM meetings").fetchall():
+    for row in conn.execute("SELECT id, processing_status FROM meetings").fetchall():
         meeting_id = row["id"]
         audio = vault.audio_path(meeting_id)
         transcript = vault.transcript_path(meeting_id)
         # 44 bytes is a header with no samples; at or below that it captured
         # nothing.
         audio_empty = (not audio.exists()) or audio.stat().st_size <= 44
+        # A placeholder for a recording in progress has no audio yet, and one
+        # whose recording failed is kept for the notes written into it.
+        if row["processing_status"] == "recording" or has_notes(vault, meeting_id):
+            continue
         if audio_empty and not transcript.exists():
             conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
             shutil.rmtree(vault.meeting_dir(meeting_id), ignore_errors=True)

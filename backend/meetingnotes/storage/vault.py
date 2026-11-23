@@ -45,6 +45,12 @@ class Vault:
         return self.root / "meetings"
 
     @property
+    def captures_dir(self) -> Path:
+        """Where the app writes a recording when it stops, before the backend
+        copies it into the meeting."""
+        return self.root / "captures"
+
+    @property
     def config_path(self) -> Path:
         return self.settings_dir / "config.json"
 

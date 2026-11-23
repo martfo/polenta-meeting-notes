@@ -13,6 +13,9 @@ final class AppModel: ObservableObject {
     @Published var library: [LibraryGroup] = []
     @Published var selectedMeetingID: String?
     @Published var lastRecordingMessage: String?
+    /// Shown while the disk holding the vault is nearly full.
+    @Published private(set) var lowDiskWarning: String?
+    private var diskCheck: Task<Void, Never>?
 
     let client = BackendClient()
     let capture = CaptureController()
@@ -44,6 +47,14 @@ final class AppModel: ObservableObject {
     /// that capture creates on Stop.
     var pendingAttendees: [MeetingAttendee] = []
 
+    /// The placeholder meeting of the recording in progress, once the backend
+    /// has made it: notes, links and screenshots go into it during the call,
+    /// and Stop attaches the audio to it.
+    @Published private(set) var recordingMeetingID: String?
+    /// Changes with every start and stop, so a placeholder that arrives after
+    /// its recording has ended is recognised and tidied away.
+    private var recordingSession = UUID()
+
     /// The calendar meeting's end time carried from an accepted offer, for
     /// scheduling auto-stop.
     var pendingAutoStopEnd: Date?
@@ -69,10 +80,16 @@ final class AppModel: ObservableObject {
     /// link) calls this from its onAppear too. While a backend is running it
     /// is left alone: a second supervisor would kill it as an orphan, losing
     /// any job in flight. With none running (first run, before provisioning
-    /// finished) it boots as before.
-    func bootBackend() {
+    /// finished) it boots as before. `restart` is for setup finishing: the
+    /// runtime was just replaced, so a backend still running the old code is
+    /// stopped and a fresh one started.
+    func bootBackend(restart: Bool = false) {
         guard let vaultURL else { return }
-        if let supervisor, supervisor.isProcessRunning { return }
+        if restart {
+            supervisor?.stop()
+        } else if let supervisor, supervisor.isProcessRunning {
+            return
+        }
         let coordinator = RecordingCoordinator(
             capturesDirectory: vaultURL.appendingPathComponent("captures"),
             backend: client,
@@ -99,9 +116,23 @@ final class AppModel: ObservableObject {
                 try? await Task.sleep(for: .seconds(1))
                 if case .running = supervisor.state {
                     coordinator.flushPending()
+                    // A placeholder left "recording" by a crash or force quit
+                    // is settled: kept for its notes, or removed if empty.
+                    if !capture.isCapturing {
+                        try? await client.settleStaleRecordings(keep: coordinator.pendingMeetingIDs())
+                    }
                     await refreshLibrary()
                     break
                 }
+            }
+        }
+        // A disk that fills during a call loses the meeting, so free space
+        // is watched and warned about well before then.
+        diskCheck?.cancel()
+        diskCheck = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.checkDiskSpace()
+                try? await Task.sleep(for: .seconds(300))
             }
         }
         calendar.isRecording = { [weak self] in self?.capture.isCapturing ?? false }
@@ -218,9 +249,16 @@ final class AppModel: ObservableObject {
     /// hotkey repeat) cannot start or stop twice and crash the audio engine.
     private var isTransitioning = false
 
+    func checkDiskSpace() {
+        guard let vaultURL, let free = DiskSpace.freeBytes(at: vaultURL) else { return }
+        lowDiskWarning = DiskSpace.warning(freeBytes: free)
+    }
+
     func startRecording(microphone: InputDevice?) {
         guard let coordinator, !capture.isCapturing, !isTransitioning else { return }
         isTransitioning = true
+        // Warn, never block: missing the call would be worse.
+        checkDiskSpace()
         // If this recording was not started from an accepted calendar offer,
         // borrow the title, attendees, and end time from a meeting happening
         // right now, so hand-started recordings are named and auto-stop too.
@@ -250,11 +288,37 @@ final class AppModel: ObservableObject {
                 scheduleAutoStop(meetingEnd: autoStopEnd)
                 pendingAutoStopEnd = nil
                 lastRecordingMessage = nil
+                let session = UUID()
+                recordingSession = session
+                recordingMeetingID = nil
+                let title = pendingTitle ?? "Meeting"
+                let attendees = pendingAttendees
+                // Not awaited: recording never waits on the backend.
+                Task { await openPlaceholder(title: title, attendees: attendees, session: session) }
             } catch {
                 coordinator.cancel()
                 lastRecordingMessage = "Recording could not start: \(error.localizedDescription)"
             }
         }
+    }
+
+    /// Create the recording's meeting and open it, so notes, links and
+    /// screenshots can be added during the call. With the backend down the
+    /// recording carries on and its meeting is made on Stop, as before.
+    private func openPlaceholder(title: String, attendees: [MeetingAttendee], session: UUID) async {
+        guard let id = try? await client.beginRecording(title: title) else { return }
+        guard recordingSession == session, capture.isCapturing else {
+            // Stopped before the placeholder arrived; the audio went to a
+            // meeting of its own, so this empty one is removed.
+            try? await client.settleRecording(id)
+            return
+        }
+        recordingMeetingID = id
+        if !attendees.isEmpty {
+            try? await client.setAttendees(id, attendees: attendees)
+        }
+        selectedMeetingID = id
+        await refreshLibrary()
     }
 
     // MARK: - Auto-stop
@@ -312,8 +376,11 @@ final class AppModel: ObservableObject {
             let result = await capture.stop()
             let title = pendingTitle ?? "Meeting"
             pendingTitle = nil
+            let placeholderID = recordingMeetingID
+            recordingMeetingID = nil
+            recordingSession = UUID()
             do {
-                let outcome = try coordinator.stop(result, title: title)
+                let outcome = try coordinator.stop(result, title: title, meetingID: placeholderID)
                 switch outcome {
                 case .enqueued(let meetingID):
                     lastRecordingMessage = "Saved and queued for processing. You can start the next meeting now."
@@ -324,11 +391,20 @@ final class AppModel: ObservableObject {
                 case .pendingBackend:
                     lastRecordingMessage = "Saved. The backend is not running yet, so processing will start when it is."
                 case .emptyRecording:
-                    lastRecordingMessage = "That recording captured no audio, so nothing was saved. "
-                        + "Check the microphone and system-audio permissions and the input levels."
+                    if let placeholderID {
+                        try? await client.settleRecording(placeholderID)
+                        lastRecordingMessage = "That recording captured no audio. Any notes you "
+                            + "wrote are kept. Check the microphone and system-audio permissions."
+                    } else {
+                        lastRecordingMessage = "That recording captured no audio, so nothing was saved. "
+                            + "Check the microphone and system-audio permissions and the input levels."
+                    }
                 }
                 pendingAttendees = []
             } catch {
+                if let placeholderID {
+                    try? await client.settleRecording(placeholderID)
+                }
                 lastRecordingMessage = "The recording could not be saved: \(error.localizedDescription)"
             }
             await refreshLibrary()

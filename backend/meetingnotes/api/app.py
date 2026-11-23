@@ -17,7 +17,12 @@ from meetingnotes.config import Config
 from meetingnotes.enrolment import assignments as asg
 from meetingnotes.enrolment.gallery import Gallery
 from meetingnotes.jobs import queue as q
-from meetingnotes.jobs.importer import import_wav
+from meetingnotes.jobs.importer import (
+    begin_recording,
+    import_wav,
+    settle_recording,
+    settle_stale_recordings,
+)
 from meetingnotes.jobs.transcript_import import import_transcript_file
 from meetingnotes.jobs.worker import Worker, retry_meeting
 from meetingnotes.llm.chat import ask_meeting
@@ -48,6 +53,25 @@ class ImportRequest(BaseModel):
     expected_speakers: int | None = None
     mic_path: str | None = None
     system_path: str | None = None
+    # The placeholder created when recording started, to attach the audio to.
+    meeting_id: str | None = None
+
+
+class BeginRecordingRequest(BaseModel):
+    title: str = "Meeting"
+    source: str = "online"
+
+
+class SettleRecordingsRequest(BaseModel):
+    # Placeholders whose audio is still waiting to be handed over.
+    keep: list[str] = []
+
+
+class RetentionRequest(BaseModel):
+    # None keeps recordings forever.
+    keep_days: int | None = None
+    # None deletes expired recordings; a folder receives them instead.
+    archive_dir: str | None = None
 
 
 class ImportTranscriptRequest(BaseModel):
@@ -110,6 +134,10 @@ class ImageRequest(BaseModel):
     suffix: str = "png"
 
 
+# The stages that read the recording; the rest work from the transcript.
+AUDIO_STAGES = ("transcribe", "diarise", "enrich")
+
+
 def create_app(state: AppState) -> FastAPI:
     app = FastAPI(title="MeetingNotes backend")
     conn, vault = state.conn, state.vault
@@ -134,11 +162,29 @@ def create_app(state: AppState) -> FastAPI:
                 conn, vault, source_path, title=request.title,
                 source=request.source, expected_speakers=request.expected_speakers,
                 mic_path=request.mic_path, system_path=request.system_path,
+                meeting_id=request.meeting_id,
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         state.worker.notify()
         return {"meeting_id": meeting_id}
+
+    @app.post("/meetings/recording")
+    def begin_recording_placeholder(request: BeginRecordingRequest) -> dict:
+        """A recording has started: create its meeting now, so notes, links and
+        screenshots can be added during the call. Stop attaches the audio."""
+        meeting_id = begin_recording(conn, vault, title=request.title, source=request.source)
+        return {"meeting_id": meeting_id}
+
+    @app.post("/meetings/{meeting_id}/recording/settle")
+    def settle_recording_placeholder(meeting_id: str) -> dict:
+        """The recording ended without audio: keep the meeting if it has notes,
+        otherwise remove it."""
+        return {"result": settle_recording(conn, vault, meeting_id)}
+
+    @app.post("/meetings/recording/settle-stale")
+    def settle_stale(request: SettleRecordingsRequest) -> dict:
+        return {"settled": settle_stale_recordings(conn, vault, request.keep)}
 
     @app.post("/meetings/import-transcript")
     def import_transcript(request: ImportTranscriptRequest) -> dict:
@@ -208,6 +254,23 @@ def create_app(state: AppState) -> FastAPI:
 
     @app.post("/meetings/{meeting_id}/retry")
     def retry(meeting_id: str) -> dict:
+        try:
+            row = m.get_meeting(conn, meeting_id)
+        except KeyError:
+            raise HTTPException(404, "no such meeting")
+        stage = row["failed_stage"] or (
+            "summarise" if row["summary_status"] != "ready" else "transcribe")
+        # Transcribing and separating speakers need the recording. Without it a
+        # retry would only fail, and mark a finished meeting as failed.
+        if stage in AUDIO_STAGES and not vault.audio_path(meeting_id).exists():
+            if row["audio_removed_at"]:
+                where = (f" (moved to {row['audio_archive_path']})"
+                         if row["audio_archive_path"] else "")
+                raise HTTPException(409, (
+                    "This meeting's recording was removed under your audio retention "
+                    f"setting{where}, so it cannot be processed again. Its transcript, "
+                    "summary and notes are unaffected."))
+            raise HTTPException(409, "This meeting has no recording to process again.")
         job_id = retry_meeting(conn, meeting_id)
         state.worker.notify()
         return {"job_id": job_id}
@@ -342,6 +405,53 @@ def create_app(state: AppState) -> FastAPI:
         state.config.owner_name = name
         save_config(state.config, vault.config_path)
         return {"owner_name": name}
+
+    @app.get("/storage")
+    def storage() -> dict:
+        """The library's size, its parts, its growth, the free disk, and the
+        audio retention setting with its last run."""
+        from meetingnotes.storage import retention as ret
+        from meetingnotes.storage.usage import library_usage
+
+        policy = ret.get_policy(conn)
+        return {
+            **library_usage(conn, vault),
+            "retention": {
+                "keep_days": policy.keep_days,
+                "archive_dir": policy.archive_dir,
+                "last_run_at": ret.last_run["at"],
+                "problem": ret.last_run["problem"],
+            },
+        }
+
+    @app.post("/settings/audio-retention/preview")
+    def retention_preview(request: RetentionRequest) -> dict:
+        """What a retention setting would remove right now, shown before it
+        is saved so nothing goes without the person seeing it."""
+        from meetingnotes.storage import retention as ret
+
+        return ret.preview(conn, vault, request.keep_days)
+
+    @app.put("/settings/audio-retention")
+    def set_retention(request: RetentionRequest) -> dict:
+        """Save the setting and apply it in the background (moving to an
+        external drive can take a while); the worker re-applies it hourly as
+        meetings age."""
+        import threading
+
+        from meetingnotes.storage import retention as ret
+
+        archive = request.archive_dir.strip() if request.archive_dir else None
+        policy = ret.RetentionPolicy(keep_days=request.keep_days, archive_dir=archive or None)
+        problem = ret.validate_policy(vault, policy)
+        if problem:
+            raise HTTPException(400, problem)
+        ret.set_policy(conn, policy)
+        ret.last_run.update(at=None, problem=None)
+        if policy.keep_days is not None:
+            threading.Thread(target=ret.apply_retention, args=(conn, vault, policy),
+                             name="retention", daemon=True).start()
+        return {"saved": True}
 
     @app.post("/settings/restore-summary-prompt")
     def restore_summary_prompt() -> dict:

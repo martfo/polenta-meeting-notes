@@ -56,6 +56,44 @@ struct MeetingDetail: Codable, Equatable {
     let summary: String?
     let notes: String
     let reveal_path: String
+    /// When the recording was removed under the retention setting, and where
+    /// it was moved (nil when deleted).
+    var audio_removed_at: String? = nil
+    var audio_archive_path: String? = nil
+}
+
+/// The library's size and growth, and the audio retention setting.
+struct LibraryStorage: Codable, Equatable {
+    struct Parts: Codable, Equatable {
+        let recordings: Int64
+        let captures: Int64
+        let notes_and_transcripts: Int64
+        let search_index: Int64
+        let other: Int64
+    }
+    struct Recent: Codable, Equatable { let bytes: Int64; let hours: Double }
+    struct Disk: Codable, Equatable { let free_bytes: Int64; let total_bytes: Int64 }
+    struct Retention: Codable, Equatable {
+        let keep_days: Int?
+        let archive_dir: String?
+        let last_run_at: String?
+        let problem: String?
+    }
+    let total_bytes: Int64
+    let parts: Parts
+    let meetings: Int
+    let meetings_with_audio: Int
+    let last_30_days: Recent
+    let disk: Disk
+    let retention: Retention
+}
+
+/// What a retention setting would remove right now.
+struct RetentionPreview: Codable, Equatable {
+    let meetings: Int
+    let hours: Double
+    let bytes: Int64
+    let before: String?
 }
 
 final class BackendClient: BackendEnqueuing, @unchecked Sendable {
@@ -101,6 +139,34 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
 
     func saveSummary(_ id: String, body: String) async throws {
         let _: [String: AnyDecodable] = try await put("/meetings/\(id)/summary", body: ["body": body])
+    }
+
+    func storage() async throws -> LibraryStorage {
+        try await get("/storage")
+    }
+
+    private struct RetentionBody: Encodable {
+        let keep_days: Int?
+        let archive_dir: String?
+
+        // Nil is sent as null, so "keep forever" clears the setting.
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(keep_days, forKey: .keep_days)
+            try container.encode(archive_dir, forKey: .archive_dir)
+        }
+        enum CodingKeys: String, CodingKey { case keep_days, archive_dir }
+    }
+
+    func retentionPreview(keepDays: Int?) async throws -> RetentionPreview {
+        try await send("POST", "/settings/audio-retention/preview",
+                       encodable: RetentionBody(keep_days: keepDays, archive_dir: nil))
+    }
+
+    func setRetention(keepDays: Int?, archiveDir: String?) async throws {
+        let _: [String: AnyDecodable] = try await send(
+            "PUT", "/settings/audio-retention",
+            encodable: RetentionBody(keep_days: keepDays, archive_dir: archiveDir))
     }
 
     func restoreDefaultSummaryPrompt() async throws {
@@ -170,6 +236,28 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         if let folder { body["folder"] = folder }
         let response: Response = try await post("/library/chat", body: body)
         return (response.answer, response.citations)
+    }
+
+    /// Create the placeholder meeting for a recording that has just started.
+    func beginRecording(title: String, source: String = "online") async throws -> String {
+        struct Created: Codable { let meeting_id: String }
+        let created: Created = try await post(
+            "/meetings/recording", body: ["title": title, "source": source])
+        return created.meeting_id
+    }
+
+    /// The recording ended without audio: the backend keeps the placeholder if
+    /// it has notes, otherwise removes it.
+    func settleRecording(_ id: String) async throws {
+        let _: [String: AnyDecodable] = try await post("/meetings/\(id)/recording/settle", body: nil)
+    }
+
+    /// Settle placeholders left by a crash, except those whose audio is still
+    /// waiting to be handed over.
+    func settleStaleRecordings(keep: [String]) async throws {
+        struct Payload: Encodable { let keep: [String] }
+        let _: [String: AnyDecodable] = try await send(
+            "POST", "/meetings/recording/settle-stale", encodable: Payload(keep: keep))
     }
 
     func deleteMeeting(_ id: String) async throws {
@@ -249,9 +337,10 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
 
     @discardableResult
     func importMeeting(audioPath: String, micPath: String?, systemPath: String?,
-                       title: String, source: String) throws -> String {
+                       title: String, source: String, meetingID: String?) throws -> String {
         struct Imported: Codable { let meeting_id: String }
         var body = ["path": audioPath, "title": title, "source": source]
+        if let meetingID { body["meeting_id"] = meetingID }
         if let micPath { body["mic_path"] = micPath }
         if let systemPath { body["system_path"] = systemPath }
         let result: Imported = try syncRequest("POST", "/meetings/import", body: body)
@@ -284,10 +373,23 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
 
     private func request<T: Decodable>(_ method: String, _ path: String, body: [String: String]?) async throws -> T {
         let (data, response) = try await session.data(for: try makeRequest(method, path, body: body))
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        try Self.check(response, data, path)
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    /// A refusal carries the backend's own plain reason ({"detail": "..."});
+    /// show that rather than a generic error.
+    private static func check(_ response: URLResponse, _ data: Data, _ path: String) throws {
+        guard let http = response as? HTTPURLResponse else {
+            throw BackendError(message: "The backend did not answer for \(path).")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            struct Detail: Decodable { let detail: String }
+            if let detail = try? JSONDecoder().decode(Detail.self, from: data) {
+                throw BackendError(message: detail.detail)
+            }
             throw BackendError(message: "The backend answered with an error for \(path).")
         }
-        return try JSONDecoder().decode(T.self, from: data)
     }
 
     private func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, encodable: B) async throws -> T {
@@ -296,9 +398,7 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         request.httpBody = try JSONEncoder().encode(encodable)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw BackendError(message: "The backend answered with an error for \(path).")
-        }
+        try Self.check(response, data, path)
         return try JSONDecoder().decode(T.self, from: data)
     }
 

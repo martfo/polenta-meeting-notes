@@ -95,6 +95,12 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE meetings ADD COLUMN suggested_folder TEXT;
     """,
+    # 4: audio retention. When a meeting's recordings were removed under the
+    # retention setting, and the folder they were moved to (NULL if deleted).
+    """
+    ALTER TABLE meetings ADD COLUMN audio_removed_at TEXT;
+    ALTER TABLE meetings ADD COLUMN audio_archive_path TEXT;
+    """,
 ]
 
 PROCESSING_STATUSES = {

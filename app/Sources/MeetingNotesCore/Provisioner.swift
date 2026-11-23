@@ -113,7 +113,16 @@ public enum RuntimeLocation {
 ///     An existing vault's index is rebuilt in the background on first start.
 /// 40: the answer prompt's example and code comments use invented examples
 ///     only; no behaviour change.
-public let runtimeVersion = "40"
+/// 41: a recording's meeting is created when recording starts (status
+///     "recording"), so notes, links and screenshots can be added during the
+///     call; Stop attaches the audio to it, and a recording that captured
+///     nothing keeps the meeting only if it has notes.
+/// 42: library storage. A recording's raw capture is removed once its meeting
+///     holds an identical copy (and the old duplicates are swept at start);
+///     the Storage section reports sizes and growth; an optional retention
+///     setting deletes or moves recordings past a chosen age (default:
+///     forever); a retry that would need a removed recording is refused.
+public let runtimeVersion = "42"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.
