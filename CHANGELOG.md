@@ -3,6 +3,35 @@
 Newest first. "Runtime" is the backend version the app sets up; a new runtime means the app shows
 the setup screen once after updating, and you click **Set up the backend** then **Continue**.
 
+## 2026-11-25: pasted images show at once
+
+A pasted image sometimes left an empty gap in the notes and appeared only after the next
+change, so it looked as if the paste had failed. It now shows as soon as it is pasted. No
+setup screen after this update.
+
+## 2026-11-24: resize images in the notes (runtime 44)
+
+Hover over an image in the notes to see a handle at its bottom-right corner. Drag the handle
+to make the image smaller or larger (up to the width of the pane); the text below moves with
+it. Double-click the handle to put the image back to its own size. Undo works for both. The
+width is kept in the image's link the way Obsidian writes it, `![pasted image|320](...)`, so
+the notes open at the same size in Obsidian. Resizing an image doesn't count as changing the
+notes, so it never sets off a new summary.
+
+After updating, the setup screen appears once: click **Set up the backend**, then **Continue**.
+
+## 2026-11-24: screenshots show inline in the notes (runtime 43)
+
+A pasted screenshot or image now appears in the notes where you paste it, at the width of the
+pane (tall ones are shown shorter), instead of as a strip of thumbnails below. You can type
+above and below it, and move or delete it like text. Copy, cut and undo keep the image.
+Pasting from an app that puts both a picture and text on the clipboard, such as a spreadsheet,
+pastes the text; the **Paste image** button still pastes the picture. Notes are stored as
+before, as text with image links, so the summary, search and text read from screenshots work
+unchanged, and existing notes show their images inline straight away.
+
+After updating, the setup screen appears once: click **Set up the backend**, then **Continue**.
+
 ## 2026-11-23: keep the library from outgrowing the disk (runtime 42)
 
 Each recording used to be stored twice: once as a raw capture and once in its meeting. The raw

@@ -27,7 +27,12 @@ from meetingnotes.jobs.transcript_import import import_transcript_file
 from meetingnotes.jobs.worker import Worker, retry_meeting
 from meetingnotes.llm.chat import ask_meeting
 from meetingnotes.llm.folder_filing import suggested_folder
-from meetingnotes.notes.notes import paste_image, read_notes, write_notes
+from meetingnotes.notes.notes import (
+    paste_image,
+    read_notes,
+    without_image_sizes,
+    write_notes,
+)
 from meetingnotes.storage import folders as fol
 from meetingnotes.storage import meetings as m
 from meetingnotes.storage.vault import Vault
@@ -132,6 +137,9 @@ class AttendeesRequest(BaseModel):
 class ImageRequest(BaseModel):
     data_base64: str
     suffix: str = "png"
+    # The app places the link at the cursor itself and saves the notes, so it
+    # asks for the file to be stored only.
+    append_to_notes: bool = True
 
 
 # The stages that read the recording; the rest work from the transcript.
@@ -555,14 +563,20 @@ def create_app(state: AppState) -> FastAPI:
 
     @app.put("/meetings/{meeting_id}/notes")
     def save_notes(meeting_id: str, request: NotesRequest) -> dict:
+        before = read_notes(vault, meeting_id)
         write_notes(vault, meeting_id, request.text)
+        if without_image_sizes(before) == without_image_sizes(request.text):
+            # Nothing written changed (an image was resized, or the same text
+            # saved again): the summary and search index still match.
+            return {"saved": True, "summary_action": "none"}
         _reindex(meeting_id)  # notes are searchable
         return {"saved": True, "summary_action": _summary_action_for_notes_change(meeting_id)}
 
     @app.post("/meetings/{meeting_id}/notes/image")
     def add_image(meeting_id: str, request: ImageRequest) -> dict:
         relative = paste_image(
-            vault, meeting_id, base64.b64decode(request.data_base64), request.suffix
+            vault, meeting_id, base64.b64decode(request.data_base64), request.suffix,
+            append=request.append_to_notes,
         )
         # Recognise the image's text now, so chat, the summary, and the search
         # index can all use it. Cached in a sidecar; failure never blocks the
@@ -574,8 +588,10 @@ def create_app(state: AppState) -> FastAPI:
 
                 ocr_text = store_image_ocr(
                     vault.meeting_dir(meeting_id) / relative, state.ocr_engine)
-                if ocr_text:
-                    _reindex(meeting_id)  # make the recognised text searchable
+                if ocr_text and request.append_to_notes:
+                    # Make the recognised text searchable. Otherwise the notes
+                    # save that places the link re-indexes.
+                    _reindex(meeting_id)
             except Exception:
                 import logging
 
@@ -584,7 +600,9 @@ def create_app(state: AppState) -> FastAPI:
         return {
             "path": relative,
             "ocr_found": bool(ocr_text),
-            "summary_action": _summary_action_for_notes_change(meeting_id),
+            # Notes unchanged until the app saves them with the link in place.
+            "summary_action": (_summary_action_for_notes_change(meeting_id)
+                               if request.append_to_notes else "none"),
         }
 
     @app.post("/meetings/{meeting_id}/regenerate-summary")

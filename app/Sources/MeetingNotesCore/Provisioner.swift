@@ -122,7 +122,12 @@ public enum RuntimeLocation {
 ///     the Storage section reports sizes and growth; an optional retention
 ///     setting deletes or moves recordings past a chosen age (default:
 ///     forever); a retry that would need a removed recording is refused.
-public let runtimeVersion = "42"
+/// 43: a pasted image can be stored without the backend appending its link to
+///     notes.md, so the app shows it inline where it was pasted.
+/// 44: saving notes whose only change is an image's display width (kept in
+///     its alt text, Obsidian style: ![pasted image|320](assets/x.png)) leaves
+///     the summary and search index alone.
+public let runtimeVersion = "44"
 
 public protocol RuntimeInstalling {
     /// Fetch the standalone CPython build for Apple Silicon.

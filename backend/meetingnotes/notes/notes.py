@@ -24,14 +24,18 @@ def write_notes(vault: Vault, meeting_id: str, text: str) -> None:
 
 
 def paste_image(vault: Vault, meeting_id: str, image_bytes: bytes,
-                suffix: str = "png") -> str:
-    """Save a pasted image into assets/ and append a relative link to
-    notes.md. Returns the relative path."""
+                suffix: str = "png", append: bool = True) -> str:
+    """Save a pasted image into assets/ and, with `append`, add a relative
+    link to the end of notes.md. The app shows images inline where they were
+    pasted, so it places the link itself and passes append=False. Returns the
+    relative path."""
     assets = vault.assets_dir(meeting_id)
     assets.mkdir(parents=True, exist_ok=True)
     name = f"pasted-{uuid.uuid4().hex[:12]}.{suffix}"
     (assets / name).write_bytes(image_bytes)
     relative = f"assets/{name}"
+    if not append:
+        return relative
 
     notes = read_notes(vault, meeting_id)
     if notes and not notes.endswith("\n"):
@@ -39,6 +43,17 @@ def paste_image(vault: Vault, meeting_id: str, image_bytes: bytes,
     notes += f"![pasted image]({relative})\n"
     write_notes(vault, meeting_id, notes)
     return relative
+
+
+# The display width the app keeps in an image's alt text, Obsidian style:
+# ![pasted image|320](assets/x.png).
+_IMAGE_WIDTH = re.compile(r"(!\[[^\]]*?)\|\d+(?:x\d+)?(\]\(assets/)")
+
+
+def without_image_sizes(text: str) -> str:
+    """The notes with image display widths taken out, so a change that only
+    resizes an image can be told apart from a change to what was written."""
+    return _IMAGE_WIDTH.sub(r"\1\2", text)
 
 
 def linked_images(vault: Vault, meeting_id: str) -> list[Path]:

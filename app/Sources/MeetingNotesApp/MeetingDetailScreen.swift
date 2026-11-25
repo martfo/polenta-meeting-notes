@@ -19,7 +19,7 @@ struct MeetingDetailScreen: View {
     @State private var tab = "Summary"
     @State private var notesDraft = ""
     @State private var lastSavedNotes = ""
-    @FocusState private var notesFocused: Bool
+    @State private var notesEditor = NotesEditorController()
     @State private var summaryDraft = ""
     @State private var lastSavedSummary = ""
     @FocusState private var summaryFocused: Bool
@@ -32,7 +32,6 @@ struct MeetingDetailScreen: View {
     @State private var editingSummary = false
     @AppStorage(Appearance.sizeKey) private var baseFontSize = Appearance.defaultSize
     @AppStorage(Appearance.designKey) private var fontDesign = "system"
-    @State private var pasteMonitor: Any?
     @State private var autosaveTask: Task<Void, Never>?
     @State private var showRegeneratePrompt = false
     @State private var keepEditsChosen = false
@@ -115,7 +114,7 @@ struct MeetingDetailScreen: View {
             // A recording in progress opens on its notes, ready to type into.
             if isRecording {
                 tab = "Notes"
-                notesFocused = true
+                notesEditor.focus()
             }
             // Keep the open meeting fresh while it is still being processed, so
             // a stage change or failure shows without a click. Once it has
@@ -280,32 +279,15 @@ struct MeetingDetailScreen: View {
             }
         case "Notes":
             VStack(alignment: .leading) {
-                TextEditor(text: $notesDraft)
-                    .font(contentFont)
-                    .focused($notesFocused)
-                    .onChange(of: notesFocused) { _, focused in
-                        if !focused { saveNotes() }
-                    }
+                NotesTextEditor(
+                    text: $notesDraft,
+                    baseURL: URL(fileURLWithPath: detail.reveal_path, isDirectory: true),
+                    font: Appearance.nsFont(size: baseFontSize, design: fontDesign),
+                    controller: notesEditor,
+                    onEndEditing: { saveNotes() },
+                    onPasteImage: { pasteImageFromPasteboard() },
+                    onImageResized: { saveNotes() })
                     .onChange(of: notesDraft) { _, _ in autosaveWhileRecording() }
-                let images = pastedImageURLs(in: notesDraft, revealPath: detail.reveal_path)
-                if !images.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(images, id: \.self) { url in
-                                if let image = NSImage(contentsOf: url) {
-                                    Image(nsImage: image)
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(height: 90)
-                                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                                        .overlay(RoundedRectangle(cornerRadius: 6)
-                                            .stroke(.secondary.opacity(0.3)))
-                                }
-                            }
-                        }
-                    }
-                    .frame(height: 96)
-                }
                 let links = Self.links(in: notesDraft)
                 if !links.isEmpty {
                     VStack(alignment: .leading, spacing: 2) {
@@ -320,8 +302,8 @@ struct MeetingDetailScreen: View {
                 }
                 HStack {
                     Text("Notes save on their own and feed into the summary; they are "
-                         + "never rewritten. Paste links and screenshots straight in; they "
-                         + "are stored with the meeting.")
+                         + "never rewritten. Paste links and screenshots straight in; images "
+                         + "show where you paste them and are stored with the meeting.")
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("Paste image") { pasteImageFromPasteboard() }
@@ -329,11 +311,7 @@ struct MeetingDetailScreen: View {
                 }
             }
             .padding()
-            .onAppear { installPasteMonitor() }
-            .onDisappear {
-                removePasteMonitor()
-                saveNotes()
-            }
+            .onDisappear { saveNotes() }
         case "Speakers":
             SpeakersTab(meetingID: meetingID, attendees: detail.attendees.map(\.name)) {
                 await reload(keepingDraft: true)
@@ -590,47 +568,10 @@ struct MeetingDetailScreen: View {
         return summary
     }
 
-    /// The image files linked from the notes body, resolved against the
-    /// meeting folder on disk so the thumbnails render locally.
-    private func pastedImageURLs(in notes: String, revealPath: String) -> [URL] {
-        let base = URL(fileURLWithPath: revealPath)
-        let pattern = #"!\[[^\]]*\]\((assets/[^)]+)\)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        let range = NSRange(notes.startIndex..., in: notes)
-        return regex.matches(in: notes, range: range).compactMap { match in
-            guard let r = Range(match.range(at: 1), in: notes) else { return nil }
-            let url = base.appendingPathComponent(String(notes[r]))
-            return FileManager.default.fileExists(atPath: url.path) ? url : nil
-        }
-    }
-
     static func pasteboardHasImage() -> Bool {
         NSPasteboard.general.canReadItem(withDataConformingToTypes: [
             UTType.png.identifier, UTType.tiff.identifier,
         ])
-    }
-
-    /// The text view underneath TextEditor consumes paste itself and drops
-    /// image data on the floor, so onPasteCommand never fires. While the
-    /// notes tab is open, a local key monitor routes an image-carrying paste
-    /// here; plain text pasting stays native.
-    private func installPasteMonitor() {
-        guard pasteMonitor == nil else { return }
-        pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard event.modifierFlags.contains(.command),
-                  event.charactersIgnoringModifiers?.lowercased() == "v",
-                  Self.pasteboardHasImage()
-            else { return event }
-            pasteImageFromPasteboard()
-            return nil
-        }
-    }
-
-    private func removePasteMonitor() {
-        if let pasteMonitor {
-            NSEvent.removeMonitor(pasteMonitor)
-        }
-        pasteMonitor = nil
     }
 
     private func pasteImageFromPasteboard() {
@@ -641,18 +582,21 @@ struct MeetingDetailScreen: View {
             }
         guard let png else { return }
         Task {
-            // Typed text first, so the backend appends the image link after it.
+            // The backend stores the file and leaves notes.md alone; the image
+            // goes in at the cursor, and the notes are saved with it in place.
+            guard let stored = try? await model.client.pasteImage(
+                meetingID, data: png, appendToNotes: false) else { return }
+            if !notesEditor.insertImage(path: stored.path) {
+                // The editor is not showing: add it at the end instead.
+                if !notesDraft.isEmpty && !notesDraft.hasSuffix("\n") { notesDraft += "\n" }
+                notesDraft += NoteImages.markdown(alt: NoteImages.defaultAlt, path: stored.path) + "\n"
+            }
             lastSavedNotes = notesDraft
             _ = try? await model.client.saveNotes(meetingID, text: notesDraft)
-            _ = try? await model.client.pasteImage(meetingID, data: png)
-            if let fresh = try? await model.client.meeting(meetingID) {
-                detail = fresh
-                notesDraft = fresh.notes
-                lastSavedNotes = fresh.notes
-            }
-            // No regenerate prompt mid-paste: the image is added at once, and
-            // an edited summary is left for the menu's Regenerate to offer.
-            // A machine summary was already re-queued by the backend.
+            // No regenerate prompt mid-paste: saving the notes re-queues a
+            // machine summary, and an edited one is left for the menu's
+            // Regenerate to offer.
+            await reload(keepingDraft: true)
         }
     }
 }

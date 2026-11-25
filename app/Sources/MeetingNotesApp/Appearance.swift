@@ -29,4 +29,18 @@ enum Appearance {
     static func font(size: Double, design raw: String) -> Font {
         .system(size: size, design: design(from: raw))
     }
+
+    /// The same font for AppKit views (the notes editor).
+    static func nsFont(size: Double, design raw: String) -> NSFont {
+        let base = NSFont.systemFont(ofSize: size)
+        let design: NSFontDescriptor.SystemDesign
+        switch raw {
+        case "serif": design = .serif
+        case "rounded": design = .rounded
+        case "monospaced": design = .monospaced
+        default: return base
+        }
+        guard let descriptor = base.fontDescriptor.withDesign(design) else { return base }
+        return NSFont(descriptor: descriptor, size: size) ?? base
+    }
 }

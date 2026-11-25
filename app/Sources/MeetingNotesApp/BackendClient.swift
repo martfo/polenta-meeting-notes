@@ -210,12 +210,19 @@ final class BackendClient: BackendEnqueuing, @unchecked Sendable {
         return suggestion.folder
     }
 
-    func pasteImage(_ id: String, data: Data, suffix: String = "png") async throws -> (path: String, summaryAction: String) {
-        struct Payload: Encodable { let data_base64: String; let suffix: String }
+    /// Stores a pasted image with the meeting. With `appendToNotes` the
+    /// backend also adds its link to the end of notes.md; without, the app
+    /// places the link itself and saves the notes.
+    func pasteImage(_ id: String, data: Data, suffix: String = "png",
+                    appendToNotes: Bool = true) async throws -> (path: String, summaryAction: String) {
+        struct Payload: Encodable {
+            let data_base64: String; let suffix: String; let append_to_notes: Bool
+        }
         struct Response: Codable { let path: String; let summary_action: String }
         let response: Response = try await send(
             "POST", "/meetings/\(id)/notes/image",
-            encodable: Payload(data_base64: data.base64EncodedString(), suffix: suffix))
+            encodable: Payload(data_base64: data.base64EncodedString(), suffix: suffix,
+                               append_to_notes: appendToNotes))
         return (response.path, response.summary_action)
     }
 
